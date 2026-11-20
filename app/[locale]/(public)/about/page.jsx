@@ -8,34 +8,44 @@ import {
   Quote, Linkedin, Mail, Sparkles,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { cn } from '@/lib/utils';
 
-const MotionImage = motion(Image);
-
-// ✅ Founder photo carousel — cycles 1.jpg → 2.jpg → 3.jpg forever
 const FOUNDER_PHOTOS = [
   { src: '/images/1.jpg', alt: 'Eshetu Teshager', label: 'Founder',  note: 'Since 2014' },
   { src: '/images/2.jpg', alt: 'Our workshop',    label: 'Workshop', note: 'Our roots'  },
   { src: '/images/3.jpg', alt: 'Our showroom',    label: 'Showroom', note: 'Our future' },
 ];
 
+const VALUES = [
+  { icon: Heart,      key: 'quality' },
+  { icon: Users,      key: 'customer' },
+  { icon: Award,      key: 'honesty' },
+  { icon: TrendingUp, key: 'innovation' },
+];
+
+const fadeUp = {
+  hidden:  { opacity: 0, y: 18 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: 'easeOut' } },
+};
+
+const stagger = {
+  hidden:  {},
+  visible: { transition: { staggerChildren: 0.09 } },
+};
+
 export default function AboutPage() {
   const t = useTranslations('about');
 
-  // ✅ Infinite photo cycling
   const [photoIdx, setPhotoIdx] = useState(0);
+  const [paused, setPaused] = useState(false);
+
   useEffect(() => {
+    if (paused) return;
     const id = setInterval(() => {
       setPhotoIdx((i) => (i + 1) % FOUNDER_PHOTOS.length);
-    }, 4000); // change every 4s
+    }, 4500);
     return () => clearInterval(id);
-  }, []);
-
-  const VALUES = [
-    { icon: Heart,      key: 'quality' },
-    { icon: Users,      key: 'customer' },
-    { icon: Award,      key: 'honesty' },
-    { icon: TrendingUp, key: 'innovation' },
-  ];
+  }, [paused]);
 
   const STATS = [
     { value: '2014',   label: t('stats.founded') },
@@ -44,28 +54,18 @@ export default function AboutPage() {
     { value: '30+',    label: t('stats.employees') },
   ];
 
-  const fadeUp = {
-    hidden:  { opacity: 0, y: 30 },
-    visible: { opacity: 1, y: 0, transition: { duration: 0.6, ease: 'easeOut' } },
-  };
-
-  const stagger = {
-    hidden:  {},
-    visible: { transition: { staggerChildren: 0.12 } },
-  };
-
   const active = FOUNDER_PHOTOS[photoIdx];
 
   return (
-    <div>
+    <div className="bg-stone-50/40 min-h-screen">
       {/* HEADER */}
-      <section className="bg-gradient-to-br from-brand to-brand-dark text-white py-16">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+      <section className="relative overflow-hidden bg-gradient-to-br from-stone-900 via-amber-900 to-amber-800 text-white py-16">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
           <motion.h1
             initial="hidden"
             animate="visible"
             variants={fadeUp}
-            className="text-4xl md:text-5xl font-bold mb-4"
+            className="text-4xl md:text-5xl font-bold mb-4 tracking-tight"
           >
             {t('title')}
           </motion.h1>
@@ -73,12 +73,14 @@ export default function AboutPage() {
             initial="hidden"
             animate="visible"
             variants={fadeUp}
-            transition={{ delay: 0.15 }}
-            className="text-blue-100 text-lg max-w-2xl mx-auto"
+            transition={{ delay: 0.12 }}
+            className="text-amber-100/90 text-lg max-w-2xl mx-auto"
           >
             {t('subtitle')}
           </motion.p>
         </div>
+        <div className="absolute -bottom-20 -right-20 w-72 h-72 rounded-full bg-amber-500/10 pointer-events-none" />
+        <div className="absolute -top-20 -left-20 w-64 h-64 rounded-full bg-white/5 pointer-events-none" />
       </section>
 
       {/* STORY */}
@@ -87,13 +89,13 @@ export default function AboutPage() {
           <motion.div
             initial="hidden"
             whileInView="visible"
-            viewport={{ once: true, amount: 0.3 }}
+            viewport={{ once: true, amount: 0.25 }}
             variants={stagger}
           >
-            <motion.h2 variants={fadeUp} className="text-3xl font-bold text-gray-800 mb-4">
+            <motion.h2 variants={fadeUp} className="text-3xl font-bold text-stone-900 mb-4">
               {t('storyTitle')}
             </motion.h2>
-            <div className="space-y-4 text-gray-700 leading-relaxed">
+            <div className="space-y-4 text-stone-700 leading-relaxed">
               <motion.p variants={fadeUp}>{t('storyP1')}</motion.p>
               <motion.p variants={fadeUp}>{t('storyP2')}</motion.p>
               <motion.p variants={fadeUp}>{t('storyP3')}</motion.p>
@@ -103,7 +105,7 @@ export default function AboutPage() {
           <motion.div
             initial="hidden"
             whileInView="visible"
-            viewport={{ once: true, amount: 0.3 }}
+            viewport={{ once: true, amount: 0.25 }}
             variants={stagger}
             className="grid grid-cols-2 gap-4"
           >
@@ -111,11 +113,12 @@ export default function AboutPage() {
               <motion.div
                 key={i}
                 variants={fadeUp}
-                whileHover={{ y: -4, scale: 1.02 }}
-                className="bg-blue-50 rounded-xl p-6 text-center transition-shadow hover:shadow-md"
+                whileHover={{ y: -3, scale: 1.015 }}
+                transition={{ duration: 0.2 }}
+                className="bg-white rounded-2xl p-6 text-center border border-stone-200/90 shadow-xs hover:border-amber-400/70 hover:shadow-sm transition"
               >
-                <p className="text-3xl font-bold text-brand">{s.value}</p>
-                <p className="text-sm text-gray-600 mt-1">{s.label}</p>
+                <p className="text-3xl font-bold text-amber-800">{s.value}</p>
+                <p className="text-sm text-stone-600 mt-1">{s.label}</p>
               </motion.div>
             ))}
           </motion.div>
@@ -123,7 +126,7 @@ export default function AboutPage() {
       </section>
 
       {/* MISSION / VISION */}
-      <section className="bg-gray-50 py-16">
+      <section className="bg-stone-100/70 border-y border-stone-200/80 py-16">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <motion.div
             initial="hidden"
@@ -134,79 +137,77 @@ export default function AboutPage() {
           >
             <motion.div
               variants={fadeUp}
-              whileHover={{ y: -4 }}
-              className="bg-white rounded-xl p-8 border border-gray-200 transition-shadow hover:shadow-lg"
+              whileHover={{ y: -3 }}
+              transition={{ duration: 0.2 }}
+              className="bg-white rounded-2xl p-8 border border-stone-200/90 shadow-xs hover:border-amber-400/70 hover:shadow-sm transition"
             >
-              <div className="w-12 h-12 rounded-lg bg-blue-50 flex items-center justify-center mb-4">
-                <Target size={24} className="text-brand" />
+              <div className="w-12 h-12 rounded-xl bg-amber-100/80 flex items-center justify-center mb-4">
+                <Target size={24} className="text-amber-800" />
               </div>
-              <h3 className="text-2xl font-bold text-gray-800 mb-3">{t('mission')}</h3>
-              <p className="text-gray-700 leading-relaxed">{t('missionDesc')}</p>
+              <h3 className="text-2xl font-bold text-stone-900 mb-3">{t('mission')}</h3>
+              <p className="text-stone-700 leading-relaxed">{t('missionDesc')}</p>
             </motion.div>
 
             <motion.div
               variants={fadeUp}
-              whileHover={{ y: -4 }}
-              className="bg-white rounded-xl p-8 border border-gray-200 transition-shadow hover:shadow-lg"
+              whileHover={{ y: -3 }}
+              transition={{ duration: 0.2 }}
+              className="bg-white rounded-2xl p-8 border border-stone-200/90 shadow-xs hover:border-amber-400/70 hover:shadow-sm transition"
             >
-              <div className="w-12 h-12 rounded-lg bg-blue-50 flex items-center justify-center mb-4">
-                <Eye size={24} className="text-brand" />
+              <div className="w-12 h-12 rounded-xl bg-amber-100/80 flex items-center justify-center mb-4">
+                <Eye size={24} className="text-amber-800" />
               </div>
-              <h3 className="text-2xl font-bold text-gray-800 mb-3">{t('vision')}</h3>
-              <p className="text-gray-700 leading-relaxed">{t('visionDesc')}</p>
+              <h3 className="text-2xl font-bold text-stone-900 mb-3">{t('vision')}</h3>
+              <p className="text-stone-700 leading-relaxed">{t('visionDesc')}</p>
             </motion.div>
           </motion.div>
         </div>
       </section>
 
-      {/* ✅ FOUNDER SECTION */}
-      <section className="relative py-20 overflow-hidden bg-gradient-to-b from-white to-gray-50">
-        <div className="absolute -top-24 -left-24 w-72 h-72 rounded-full bg-brand/10 blur-3xl" />
-        <div className="absolute -bottom-24 -right-24 w-72 h-72 rounded-full bg-brand/10 blur-3xl" />
+      {/* FOUNDER SECTION */}
+      <section className="relative py-20 overflow-hidden bg-gradient-to-b from-white to-stone-50/70">
+        <div className="absolute -top-24 -left-24 w-72 h-72 rounded-full bg-amber-500/10 blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-24 -right-24 w-72 h-72 rounded-full bg-stone-400/10 blur-3xl pointer-events-none" />
 
         <div className="relative max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
           <motion.div
             initial="hidden"
             whileInView="visible"
-            viewport={{ once: true, amount: 0.3 }}
+            viewport={{ once: true, amount: 0.25 }}
             variants={fadeUp}
             className="text-center mb-12"
           >
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand/10 text-brand text-xs font-semibold mb-4">
-              <Sparkles size={12} />
+            <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-amber-100 text-amber-900 text-xs font-semibold mb-4">
+              <Sparkles size={12} className="text-amber-700" />
               {t('founderSubtitle')}
             </div>
-            <h2 className="text-3xl md:text-4xl font-bold text-gray-800">
+            <h2 className="text-3xl md:text-4xl font-bold text-stone-900">
               {t('founderTitle')}
             </h2>
           </motion.div>
 
           <motion.div
-            initial={{ opacity: 0, y: 40 }}
+            initial={{ opacity: 0, y: 24 }}
             whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, amount: 0.3 }}
-            transition={{ duration: 0.7, ease: 'easeOut' }}
-            className="bg-white rounded-3xl shadow-xl border border-gray-100 overflow-hidden"
+            viewport={{ once: true, amount: 0.2 }}
+            transition={{ duration: 0.55, ease: 'easeOut' }}
+            onMouseEnter={() => setPaused(true)}
+            onMouseLeave={() => setPaused(false)}
+            className="bg-white rounded-3xl shadow-sm border border-stone-200/90 overflow-hidden"
           >
             <div className="grid grid-cols-1 md:grid-cols-5 gap-0">
-              {/* ✅ Photo (infinite crossfade) */}
-              <motion.div
-                initial={{ opacity: 0, x: -30 }}
-                whileInView={{ opacity: 1, x: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.7, delay: 0.1 }}
-                className="md:col-span-2 relative aspect-square md:aspect-auto md:min-h-[500px] bg-gradient-to-br from-brand/20 to-brand/5 overflow-hidden"
-              >
+              {/* Photo Carousel */}
+              <div className="md:col-span-2 relative aspect-square md:aspect-auto md:min-h-[480px] bg-stone-900 overflow-hidden">
                 <AnimatePresence mode="wait">
                   <motion.div
                     key={active.src}
-                    initial={{ opacity: 0, scale: 1.1 }}
+                    initial={{ opacity: 0, scale: 1.06 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 1.05 }}
-                    transition={{ duration: 0.9, ease: 'easeOut' }}
+                    exit={{ opacity: 0, scale: 1.03 }}
+                    transition={{ duration: 0.75, ease: 'easeOut' }}
                     className="absolute inset-0"
                   >
-                    <MotionImage
+                    <Image
                       src={active.src}
                       alt={active.alt}
                       fill
@@ -217,71 +218,76 @@ export default function AboutPage() {
                   </motion.div>
                 </AnimatePresence>
 
-                {/* Gradient + label (updates with photo) */}
-                <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/50 to-transparent pointer-events-none" />
+                <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-stone-950/75 via-stone-950/30 to-transparent pointer-events-none" />
+
                 <AnimatePresence mode="wait">
                   <motion.div
                     key={'label-' + active.src}
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -8 }}
-                    transition={{ duration: 0.4 }}
-                    className="absolute bottom-4 left-4 text-white"
+                    transition={{ duration: 0.35 }}
+                    className="absolute bottom-4 left-4 text-white z-10"
                   >
-                    <p className="text-xs uppercase tracking-wider opacity-80">{active.label}</p>
+                    <p className="text-[11px] uppercase tracking-wider text-amber-200/90 font-medium">
+                      {active.label}
+                    </p>
                     <p className="text-sm font-semibold">{active.note}</p>
                   </motion.div>
                 </AnimatePresence>
 
                 {/* Dot indicators */}
-                <div className="absolute top-4 right-4 flex items-center gap-1.5">
-                  {FOUNDER_PHOTOS.map((_, i) => (
+                <div className="absolute top-4 right-4 z-10 flex items-center gap-1.5">
+                  {FOUNDER_PHOTOS.map((photo, i) => (
                     <button
-                      key={i}
+                      key={photo.src}
+                      type="button"
                       onClick={() => setPhotoIdx(i)}
                       aria-label={'Show photo ' + (i + 1)}
-                      className={
-                        'w-2 h-2 rounded-full transition-all ' +
-                        (i === photoIdx ? 'bg-white w-5' : 'bg-white/50 hover:bg-white/80')
-                      }
+                      className={cn(
+                        'h-2 rounded-full transition-all',
+                        i === photoIdx
+                          ? 'bg-amber-400 w-5'
+                          : 'w-2 bg-white/50 hover:bg-white/85'
+                      )}
                     />
                   ))}
                 </div>
-              </motion.div>
+              </div>
 
               {/* Text */}
               <div className="md:col-span-3 p-8 md:p-12 flex flex-col justify-center">
                 <motion.div
-                  initial={{ opacity: 0, y: 20 }}
+                  initial={{ opacity: 0, y: 14 }}
                   whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true }}
-                  transition={{ duration: 0.6, delay: 0.2 }}
+                  viewport={{ once: true, amount: 0.25 }}
+                  transition={{ duration: 0.45, delay: 0.1 }}
                 >
-                  <Quote size={32} className="text-brand/30 mb-4" />
+                  <Quote size={32} className="text-amber-700/25 mb-4" />
 
-                  <blockquote className="text-lg md:text-xl italic text-gray-700 leading-relaxed mb-6">
+                  <blockquote className="text-lg md:text-xl italic text-stone-700 leading-relaxed mb-6">
                     “{t('founderQuote')}”
                   </blockquote>
 
-                  <div className="border-t border-gray-100 pt-6">
-                    <h3 className="text-2xl font-bold text-gray-900">
+                  <div className="border-t border-stone-200/80 pt-6">
+                    <h3 className="text-2xl font-bold text-stone-900">
                       {t('founderName')}
                     </h3>
-                    <p className="text-sm font-medium text-brand mt-1">
+                    <p className="text-sm font-semibold text-amber-800 mt-1">
                       {t('founderRole')}
                     </p>
                   </div>
 
-                  <p className="text-sm text-gray-600 leading-relaxed mt-5">
+                  <p className="text-sm text-stone-600 leading-relaxed mt-5">
                     {t('founderBio')}
                   </p>
 
-                  <div className="flex items-center gap-2 mt-6">
+                  <div className="flex items-center gap-2.5 mt-6">
                     <motion.a
                       href="mailto:eshetu@example.com"
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-brand text-white text-sm font-medium hover:bg-brand-dark transition"
+                      whileHover={{ scale: 1.03 }}
+                      whileTap={{ scale: 0.97 }}
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-700 text-white text-sm font-medium hover:bg-amber-800 transition shadow-xs"
                     >
                       <Mail size={14} />
                       አግኙኝ
@@ -290,9 +296,9 @@ export default function AboutPage() {
                       href="https://linkedin.com"
                       target="_blank"
                       rel="noopener noreferrer"
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 text-gray-700 text-sm font-medium hover:border-brand hover:text-brand transition"
+                      whileHover={{ scale: 1.03 }}
+                      whileTap={{ scale: 0.97 }}
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-stone-300 bg-white text-stone-700 text-sm font-medium hover:border-amber-600 hover:text-amber-900 hover:bg-amber-50/40 transition"
                     >
                       <Linkedin size={14} />
                       LinkedIn
@@ -310,12 +316,12 @@ export default function AboutPage() {
         <motion.div
           initial="hidden"
           whileInView="visible"
-          viewport={{ once: true, amount: 0.3 }}
+          viewport={{ once: true, amount: 0.25 }}
           variants={fadeUp}
           className="text-center mb-12"
         >
-          <h2 className="text-3xl font-bold text-gray-800">{t('valuesTitle')}</h2>
-          <p className="text-gray-600 mt-2">{t('valuesSubtitle')}</p>
+          <h2 className="text-3xl font-bold text-stone-900">{t('valuesTitle')}</h2>
+          <p className="text-stone-600 mt-2">{t('valuesSubtitle')}</p>
         </motion.div>
 
         <motion.div
@@ -331,19 +337,23 @@ export default function AboutPage() {
               <motion.div
                 key={v.key}
                 variants={fadeUp}
-                whileHover={{ y: -6, scale: 1.02 }}
-                className="text-center p-6 rounded-xl border border-gray-200 bg-white hover:shadow-lg transition-shadow"
+                whileHover={{ y: -4, scale: 1.015 }}
+                transition={{ duration: 0.2 }}
+                className="text-center p-6 rounded-2xl border border-stone-200/90 bg-white shadow-xs hover:border-amber-400/70 hover:shadow-sm transition"
               >
                 <motion.div
-                  whileHover={{ rotate: 6 }}
-                  className="w-14 h-14 rounded-full bg-blue-50 flex items-center justify-center mx-auto mb-4"
+                  whileHover={{ rotate: 5 }}
+                  transition={{ duration: 0.2 }}
+                  className="w-14 h-14 rounded-2xl bg-amber-100/80 flex items-center justify-center mx-auto mb-4"
                 >
-                  <Icon size={26} className="text-brand" />
+                  <Icon size={25} className="text-amber-800" />
                 </motion.div>
-                <h3 className="font-bold text-gray-800 mb-2">
+                <h3 className="font-bold text-stone-900 mb-2">
                   {t(`values.${v.key}.title`)}
                 </h3>
-                <p className="text-sm text-gray-600">{t(`values.${v.key}.desc`)}</p>
+                <p className="text-sm text-stone-600 leading-relaxed">
+                  {t(`values.${v.key}.desc`)}
+                </p>
               </motion.div>
             );
           })}

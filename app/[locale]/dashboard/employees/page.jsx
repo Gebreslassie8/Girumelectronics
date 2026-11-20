@@ -1,16 +1,16 @@
 ﻿'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/components/providers/AuthProvider';
 import {
-  Plus, Search, Eye, Edit, Trash2, Users, DollarSign,
+  Plus, Search, Edit, Trash2, Eye, Users, DollarSign,
   UserCheck, UserX, Phone, Mail, Building2, Shield, Briefcase,
 } from 'lucide-react';
 import { formatETB, formatDate } from '@/lib/utils';
 import {
-  MOCK_EMPLOYEES, EMPLOYEE_STATUS, POSITIONS, DEPARTMENTS,
-  PERMISSIONS_LIST, BRANCHES,
-} from '@/lib/mockEmployees';
+  EMPLOYEE_STATUS, POSITIONS, DEPARTMENTS, PERMISSIONS_LIST,
+} from '@/lib/constants';
+import { apiFetch } from '@/lib/api';
 import Card from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
@@ -21,7 +21,12 @@ import toast from 'react-hot-toast';
 
 export default function EmployeesPage() {
   const { user } = useAuth();
-  const [employees, setEmployees] = useState(MOCK_EMPLOYEES);
+
+  const [employees, setEmployees] = useState([]);
+  const [branches, setBranches] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [branchFilter, setBranchFilter] = useState('all');
@@ -31,74 +36,114 @@ export default function EmployeesPage() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
-  const canManage = user?.role === 'admin';
+  const canManage = user?.role === 'admin' || user?.role === 'owner';
 
-  // Filter
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      apiFetch('/employees').catch(() => []),
+      apiFetch('/branches').catch(() => []),
+    ])
+      .then(([emps, brs]) => {
+        if (!cancelled) {
+          setEmployees(Array.isArray(emps) ? emps : []);
+          setBranches(Array.isArray(brs) ? brs : []);
+        }
+      })
+      .catch((err) => { if (!cancelled) setError(err.message); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
   const filtered = useMemo(() => {
     return employees.filter((e) => {
       const q = search.toLowerCase();
+      const name = e.user?.fullName || e.fullName || '';
+      const code = e.employeeCode || '';
+      const phone = e.user?.phone || e.phone || '';
+      const pos = e.position || '';
       const matchSearch =
-        e.user.fullName.toLowerCase().includes(q) ||
-        e.employeeCode.toLowerCase().includes(q) ||
-        e.user.phone.includes(q) ||
-        e.position.toLowerCase().includes(q);
+        name.toLowerCase().includes(q) ||
+        code.toLowerCase().includes(q) ||
+        phone.includes(q) ||
+        pos.toLowerCase().includes(q);
       const matchStatus = statusFilter === 'all' || e.status === statusFilter;
       const matchBranch = branchFilter === 'all' || e.branch?._id === branchFilter;
       return matchSearch && matchStatus && matchBranch;
     });
   }, [employees, search, statusFilter, branchFilter]);
 
-  // Stats
   const stats = useMemo(() => {
     const total = employees.length;
     const active = employees.filter((e) => e.status === 'active').length;
     const onLeave = employees.filter((e) => e.status === 'on_leave').length;
     const totalSalary = employees
       .filter((e) => e.status === 'active')
-      .reduce((s, e) => s + e.salary, 0);
+      .reduce((s, e) => s + (e.salary || 0), 0);
     return { total, active, onLeave, totalSalary };
   }, [employees]);
 
-  // Delete
   const handleDeleteClick = (employee) => setDeleteTarget(employee);
 
   const handleDeleteConfirm = async () => {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      await new Promise((r) => setTimeout(r, 500));
-      setEmployees(employees.filter((e) => e._id !== deleteTarget._id));
+      await apiFetch('/employees/' + deleteTarget._id, { method: 'DELETE' });
+      setEmployees((prev) => prev.filter((e) => e._id !== deleteTarget._id));
       toast.success('ሠራተኛ ተሰርዟል');
       setDeleteTarget(null);
-    } catch (_) {
-      toast.error('ስህተት ተፈጥሯል');
+    } catch (err) {
+      toast.error(err.message || 'ስህተት ተፈጥሯል');
     } finally {
       setDeleting(false);
     }
   };
 
-  // Save
-  const handleSave = (data) => {
-    if (editingEmployee) {
-      setEmployees(employees.map((e) => e._id === editingEmployee._id ? { ...e, ...data } : e));
-      toast.success('ሠራተኛ ተስተካክሏል');
-    } else {
-      const newEmployee = {
-        ...data,
-        _id: 'e' + (employees.length + 1),
-        employeeCode: `EMP-2026-${String(employees.length + 1).padStart(4, '0')}`,
-        hireDate: new Date().toISOString().split('T')[0],
-      };
-      setEmployees([newEmployee, ...employees]);
-      toast.success('ሠራተኛ ተጨምሯል');
+  const handleSave = async (data) => {
+    try {
+      if (editingEmployee) {
+        const updated = await apiFetch('/employees/' + editingEmployee._id, {
+          method: 'PATCH',
+          body: JSON.stringify(data),
+        });
+        setEmployees((prev) => prev.map((e) => (e._id === editingEmployee._id ? updated : e)));
+        toast.success('ሠራተኛ ተስተካክሏል');
+      } else {
+        const created = await apiFetch('/employees', {
+          method: 'POST',
+          body: JSON.stringify(data),
+        });
+        setEmployees((prev) => [created, ...prev]);
+        toast.success('ሠራተኛ ተጨምሯል');
+      }
+      setShowModal(false);
+      setEditingEmployee(null);
+    } catch (err) {
+      toast.error(err.message || 'ስህተት ተፈጥሯል');
     }
-    setShowModal(false);
-    setEditingEmployee(null);
   };
+
+  if (loading) {
+    return (
+      <div className="p-8 text-center text-gray-500">
+        <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+        <p className="text-sm">በመጫን ላይ...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-8 text-center">
+        <p className="text-red-600 font-medium">ስህተት ተፈጥሯል</p>
+        <p className="text-sm text-gray-500 mt-1">{error}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-800">ሠራተኞች</h1>
@@ -113,7 +158,6 @@ export default function EmployeesPage() {
         )}
       </div>
 
-      {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard label="ጠቅላላ ሠራተኞች" value={stats.total} icon={Users} color="bg-blue-500" />
         <StatCard label="ንቁ" value={stats.active} icon={UserCheck} color="bg-green-500" />
@@ -121,7 +165,6 @@ export default function EmployeesPage() {
         <StatCard label="ጠቅላላ ደመወዝ" value={formatETB(stats.totalSalary)} icon={DollarSign} color="bg-purple-500" />
       </div>
 
-      {/* Filters */}
       <Card padding="sm">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div className="relative">
@@ -131,31 +174,32 @@ export default function EmployeesPage() {
               placeholder="ፈልግ (ስም፣ ኮድ፣ ስልክ፣ የስራ መደብ)..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm"
+              className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800"
             />
           </div>
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm bg-white"
+            className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm bg-white text-gray-800"
           >
             <option value="all">ሁሉም ሁኔታዎች</option>
             {Object.entries(EMPLOYEE_STATUS).map(([k, v]) => (
-              <option key={k} value={k}>{v.label}</option>
+              <option key={k} value={k}>{v.label || v}</option>
             ))}
           </select>
           <select
             value={branchFilter}
             onChange={(e) => setBranchFilter(e.target.value)}
-            className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm bg-white"
+            className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm bg-white text-gray-800"
           >
             <option value="all">ሁሉም ቅርንጫፎች</option>
-            {BRANCHES.map((b) => <option key={b._id} value={b._id}>{b.name}</option>)}
+            {branches.map((b) => (
+              <option key={b._id} value={b._id}>{b.name}</option>
+            ))}
           </select>
         </div>
       </Card>
 
-      {/* Table */}
       <Card padding="none">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -186,29 +230,34 @@ export default function EmployeesPage() {
                 </tr>
               ) : (
                 filtered.map((emp) => {
-                  const status = EMPLOYEE_STATUS[emp.status];
+                  const status = EMPLOYEE_STATUS[emp.status] || { label: emp.status, color: 'gray' };
+                  const fullName = emp.user?.fullName || emp.fullName || '';
+                  const email = emp.user?.email || emp.email || '';
+                  const phone = emp.user?.phone || emp.phone || '';
                   return (
                     <tr key={emp._id} className="border-b border-gray-100 hover:bg-gray-50">
                       <td className="px-4 py-3 font-mono text-xs text-brand font-medium">{emp.employeeCode}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           <div className="w-8 h-8 rounded-full bg-brand text-white flex items-center justify-center font-semibold text-xs flex-shrink-0">
-                            {emp.user.fullName.charAt(0)}
+                            {fullName.charAt(0) || '?'}
                           </div>
                           <div>
-                            <p className="font-medium text-gray-800">{emp.user.fullName}</p>
-                            <p className="text-xs text-gray-500">{emp.user.email}</p>
+                            <p className="font-medium text-gray-800">{fullName}</p>
+                            <p className="text-xs text-gray-500">{email}</p>
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-gray-600">{emp.user.phone}</td>
+                      <td className="px-4 py-3 text-gray-600">{phone}</td>
                       <td className="px-4 py-3 text-gray-800">{emp.position}</td>
                       <td className="px-4 py-3">
                         <span className="inline-flex px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 text-xs">
                           {emp.department}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-right font-semibold text-gray-800">{formatETB(emp.salary)}</td>
+                      <td className="px-4 py-3 text-right font-semibold text-gray-800">
+                        {formatETB(emp.salary || 0)}
+                      </td>
                       <td className="px-4 py-3">
                         <span className="inline-flex px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-xs">
                           {emp.branch?.name || '-'}
@@ -235,7 +284,6 @@ export default function EmployeesPage() {
         </div>
       </Card>
 
-      {/* Add/Edit Modal */}
       <Modal
         isOpen={showModal}
         onClose={() => { setShowModal(false); setEditingEmployee(null); }}
@@ -244,12 +292,12 @@ export default function EmployeesPage() {
       >
         <EmployeeForm
           employee={editingEmployee}
+          branches={branches}
           onSave={handleSave}
           onCancel={() => { setShowModal(false); setEditingEmployee(null); }}
         />
       </Modal>
 
-      {/* View Modal */}
       <Modal
         isOpen={!!viewEmployee}
         onClose={() => setViewEmployee(null)}
@@ -258,15 +306,14 @@ export default function EmployeesPage() {
         {viewEmployee && <EmployeeView employee={viewEmployee} />}
       </Modal>
 
-      {/* ✅ Delete Confirmation Modal */}
       <ConfirmModal
         isOpen={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
         onConfirm={handleDeleteConfirm}
         title="ሠራተኛ ይሰረዝ?"
         message="ይህን ሠራተኛ መሰረዝ ይፈልጋሉ?"
-        itemName={deleteTarget?.user?.fullName}
-        itemType={`${deleteTarget?.position || ''} · ${deleteTarget?.employeeCode || ''}`}
+        itemName={deleteTarget?.user?.fullName || deleteTarget?.fullName}
+        itemType={(deleteTarget?.position || '') + ' · ' + (deleteTarget?.employeeCode || '')}
         confirmLabel="አዎ፣ ሰርዝ"
         cancelLabel="ተወው"
         loading={deleting}
@@ -275,8 +322,6 @@ export default function EmployeesPage() {
     </div>
   );
 }
-
-// ============ Sub-components ============
 
 function StatCard({ label, value, icon: Icon, color }) {
   return (
@@ -294,16 +339,16 @@ function StatCard({ label, value, icon: Icon, color }) {
   );
 }
 
-function EmployeeForm({ employee, onSave, onCancel }) {
+function EmployeeForm({ employee, branches, onSave, onCancel }) {
   const [form, setForm] = useState({
-    fullName: employee?.user?.fullName || '',
-    phone: employee?.user?.phone || '',
-    email: employee?.user?.email || '',
+    fullName: employee?.user?.fullName || employee?.fullName || '',
+    phone: employee?.user?.phone || employee?.phone || '',
+    email: employee?.user?.email || employee?.email || '',
     position: employee?.position || 'ሻጭ',
     department: employee?.department || 'ሽያጭ',
     salary: employee?.salary || 0,
     status: employee?.status || 'active',
-    branch: employee?.branch?._id || 'b1',
+    branch: employee?.branch?._id || '',
     emergencyName: employee?.emergencyContact?.name || '',
     emergencyPhone: employee?.emergencyContact?.phone || '',
     permissions: employee?.permissions || {
@@ -330,14 +375,13 @@ function EmployeeForm({ employee, onSave, onCancel }) {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    const branch = BRANCHES.find((b) => b._id === form.branch);
     onSave({
       user: { fullName: form.fullName, phone: form.phone, email: form.email },
       position: form.position,
       department: form.department,
       salary: form.salary,
       status: form.status,
-      branch: branch || { _id: form.branch, name: 'ቦሌ ቅርንጫፍ' },
+      branch: form.branch || null,
       emergencyContact: { name: form.emergencyName, phone: form.emergencyPhone },
       permissions: form.permissions,
     });
@@ -352,17 +396,17 @@ function EmployeeForm({ employee, onSave, onCancel }) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <FormField label="ሙሉ ስም *">
             <input name="fullName" value={form.fullName} onChange={onChange} required
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
             />
           </FormField>
           <FormField label="ስልክ *">
             <input name="phone" value={form.phone} onChange={onChange} required
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
             />
           </FormField>
           <FormField label="ኢሜይል" full>
             <input type="email" name="email" value={form.email} onChange={onChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
             />
           </FormField>
         </div>
@@ -375,36 +419,43 @@ function EmployeeForm({ employee, onSave, onCancel }) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <FormField label="የስራ መደብ *">
             <select name="position" value={form.position} onChange={onChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm bg-white"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm bg-white text-gray-800"
             >
               {POSITIONS.map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
           </FormField>
           <FormField label="ክፍል">
             <select name="department" value={form.department} onChange={onChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm bg-white"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm bg-white text-gray-800"
             >
               {DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
             </select>
           </FormField>
           <FormField label="ደመወዝ (ETB) *">
             <input type="number" name="salary" value={form.salary} onChange={onChange} required min={0}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
             />
           </FormField>
           <FormField label="ቅርንጫፍ *">
             <select name="branch" value={form.branch} onChange={onChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm bg-white"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm bg-white text-gray-800"
             >
-              {BRANCHES.map((b) => <option key={b._id} value={b._id}>{b.name}</option>)}
+              <option value="">— ይምረጡ —</option>
+              {branches.length === 0 ? (
+                <option value="" disabled>ቅርንጫፍ በመጫን ላይ...</option>
+              ) : (
+                branches.map((b) => (
+                  <option key={b._id} value={b._id}>{b.name}</option>
+                ))
+              )}
             </select>
           </FormField>
           <FormField label="ሁኔታ" full>
             <select name="status" value={form.status} onChange={onChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm bg-white"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm bg-white text-gray-800"
             >
               {Object.entries(EMPLOYEE_STATUS).map(([k, v]) => (
-                <option key={k} value={k}>{v.label}</option>
+                <option key={k} value={k}>{v.label || v}</option>
               ))}
             </select>
           </FormField>
@@ -437,12 +488,12 @@ function EmployeeForm({ employee, onSave, onCancel }) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <FormField label="ስም">
             <input name="emergencyName" value={form.emergencyName} onChange={onChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
             />
           </FormField>
           <FormField label="ስልክ">
             <input name="emergencyPhone" value={form.emergencyPhone} onChange={onChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
             />
           </FormField>
         </div>
@@ -474,25 +525,28 @@ function FormField({ label, children, full }) {
 }
 
 function EmployeeView({ employee }) {
-  const status = EMPLOYEE_STATUS[employee.status];
+  const status = EMPLOYEE_STATUS[employee.status] || { label: employee.status, color: 'gray' };
+  const fullName = employee.user?.fullName || employee.fullName || '';
+  const phone = employee.user?.phone || employee.phone || '';
+  const email = employee.user?.email || employee.email || '';
   return (
     <div>
       <div className="flex items-center gap-3 pb-4 border-b border-gray-100">
         <div className="w-14 h-14 rounded-full bg-brand text-white flex items-center justify-center font-bold text-xl">
-          {employee.user.fullName.charAt(0)}
+          {fullName.charAt(0) || '?'}
         </div>
         <div>
-          <p className="font-bold text-gray-800 text-lg">{employee.user.fullName}</p>
+          <p className="font-bold text-gray-800 text-lg">{fullName}</p>
           <p className="text-sm text-gray-500">{employee.position}</p>
         </div>
       </div>
 
       <div className="space-y-3 pt-4 text-sm">
         <Row label="ኮድ" value={employee.employeeCode} mono />
-        <Row label="ስልክ" value={employee.user.phone} />
-        <Row label="ኢሜይል" value={employee.user.email || '-'} />
+        <Row label="ስልክ" value={phone} />
+        <Row label="ኢሜይል" value={email || '-'} />
         <Row label="ክፍል" value={employee.department} />
-        <Row label="ደመወዝ" value={formatETB(employee.salary)} bold color="text-brand" />
+        <Row label="ደመወዝ" value={formatETB(employee.salary || 0)} bold color="text-brand" />
         <Row label="ቅርንጫፍ" value={employee.branch?.name || '-'} />
         <Row label="ተቀጠረ" value={formatDate(employee.hireDate)} />
         <div className="flex justify-between items-center">
@@ -509,23 +563,25 @@ function EmployeeView({ employee }) {
         </div>
       )}
 
-      <div className="pt-4 border-t border-gray-100 mt-4">
-        <p className="text-xs font-semibold text-gray-600 mb-2">ፈቃዶች</p>
-        <div className="grid grid-cols-2 gap-1.5">
-          {PERMISSIONS_LIST.map((perm) => (
-            <div key={perm.key} className="flex items-center gap-1.5 text-xs">
-              <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${
-                employee.permissions[perm.key] ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'
-              }`}>
-                {employee.permissions[perm.key] ? '✓' : '✕'}
-              </span>
-              <span className={employee.permissions[perm.key] ? 'text-gray-700' : 'text-gray-400'}>
-                {perm.label}
-              </span>
-            </div>
-          ))}
+      {employee.permissions && (
+        <div className="pt-4 border-t border-gray-100 mt-4">
+          <p className="text-xs font-semibold text-gray-600 mb-2">ፈቃዶች</p>
+          <div className="grid grid-cols-2 gap-1.5">
+            {PERMISSIONS_LIST.map((perm) => (
+              <div key={perm.key} className="flex items-center gap-1.5 text-xs">
+                <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${
+                  employee.permissions[perm.key] ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'
+                }`}>
+                  {employee.permissions[perm.key] ? '✓' : '✕'}
+                </span>
+                <span className={employee.permissions[perm.key] ? 'text-gray-700' : 'text-gray-400'}>
+                  {perm.label}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -538,5 +594,5 @@ function Row({ label, value, mono, bold, color }) {
         {value}
       </span>
     </div>
-  );
+  )
 }

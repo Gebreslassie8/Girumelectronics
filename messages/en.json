@@ -6,7 +6,7 @@
     "login": "Login",
     "dashboard": "Dashboard",
     "inventory": "Inventory",
-    "products": "Products",
+    "products": "Shop Items",
     "myProducts": "My Products",
     "orders": "Orders",
     "receipts": "Receipts",
@@ -19,7 +19,13 @@
     "activity": "Activity",
     "profile": "Profile",
     "settings": "Settings",
-    "logout": "Logout"
+    "logout": "Logout",
+    "brand": "Girum Electronics",
+    "warehouse": "Warehouse",
+    "finance": "Finance",
+    "soldItems": "Sold Items",
+    "warranty": "Warranty",  
+    "more": "More"
   },
   "sidebar": {
     "main": "Main",
@@ -205,10 +211,22 @@
     "valuesTitle": "Our Values",
     "valuesSubtitle": "The principles that guide our work",
     "values": {
-      "quality": { "title": "Quality", "desc": "We always put quality first." },
-      "customer": { "title": "Customer First", "desc": "We always respect our customers needs." },
-      "honesty": { "title": "Honesty", "desc": "We stand by our promises." },
-      "innovation": { "title": "Innovation", "desc": "We always bring new technology." }
+      "quality": {
+        "title": "Quality",
+        "desc": "We always put quality first."
+      },
+      "customer": {
+        "title": "Customer First",
+        "desc": "We always respect our customers needs."
+      },
+      "honesty": {
+        "title": "Honesty",
+        "desc": "We stand by our promises."
+      },
+      "innovation": {
+        "title": "Innovation",
+        "desc": "We always bring new technology."
+      }
     }
   },
   "contact": {

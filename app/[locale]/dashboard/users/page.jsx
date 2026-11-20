@@ -1,13 +1,14 @@
-﻿'use client';
+'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { apiFetch } from '@/lib/api';
+import { USER_ROLES, USER_BRANCHES } from '@/lib/constants';
 import { useAuth } from '@/components/providers/AuthProvider';
 import {
   Plus, Search, Users, Shield, UserCheck, UserX, Briefcase,
   Crown, Phone, Mail, Building2, MapPin, Calendar, User,
 } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
-import { MOCK_USERS, USER_ROLES, USER_BRANCHES } from '@/lib/mockUsers';
 import Card from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
@@ -25,7 +26,7 @@ const ROLE_ICONS = {
 
 export default function UsersPage() {
   const { user: currentUser } = useAuth();
-  const [users, setUsers] = useState(MOCK_USERS);
+  const [users, setUsers] = useState([]);
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -36,6 +37,14 @@ export default function UsersPage() {
   const [deleting, setDeleting] = useState(false);
 
   const canManage = currentUser?.role === 'admin';
+  // Load users from API
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch('/users')
+      .then((data) => { if (!cancelled) setUsers(Array.isArray(data) ? data : []); })
+      .catch((err) => { if (!cancelled) toast.error(err.message); });
+    return () => { cancelled = true; };
+  }, []);
 
   // Filter
   const filtered = useMemo(() => {
@@ -207,8 +216,11 @@ export default function UsersPage() {
                 </tr>
               ) : (
                 filtered.map((user) => {
-                  const roleInfo = USER_ROLES[user.role];
-                  const RoleIcon = ROLE_ICONS[user.role] || User;
+                  const roleInfo = USER_ROLES[user.role] || {
+    label: user.role ? String(user.role).charAt(0).toUpperCase() + String(user.role).slice(1) : '—',
+    color: 'gray',
+  };
+                  const RoleIcon = ROLE_ICONS?.[user.role] || User;
                   return (
                     <tr key={user._id} className="border-b border-gray-100 hover:bg-gray-50">
                       <td className="px-4 py-3">
@@ -233,7 +245,7 @@ export default function UsersPage() {
                       <td className="px-4 py-3 text-center">
                         <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
                           <RoleIcon size={10} />
-                          {roleInfo.label}
+                          {roleInfo?.label || user?.role || '—'}
                         </div>
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-600">
@@ -305,7 +317,7 @@ export default function UsersPage() {
         title="ተጠቃሚ ይሰረዝ?"
         message="ይህን ተጠቃሚ መሰረዝ ይፈልጋሉ?"
         itemName={deleteTarget?.fullName}
-        itemType={`${deleteTarget?.phone || ''} · ${deleteTarget ? USER_ROLES[deleteTarget.role]?.label : ''}`}
+        itemType={`${deleteTarget?.phone || ''} · ${deleteTarget ? (USER_ROLES[deleteTarget.role]?.label || deleteTarget.role) : ''}`}
         confirmLabel="አዎ፣ ሰርዝ"
         cancelLabel="ተወው"
         loading={deleting}
@@ -334,26 +346,70 @@ function StatCard({ label, value, icon: Icon, color }) {
 }
 
 function UserForm({ user, onSave, onCancel }) {
+  const isEdit = Boolean(user?._id);
+
   const [form, setForm] = useState({
     fullName: user?.fullName || '',
     phone: user?.phone || '',
     email: user?.email || '',
     role: user?.role || 'customer',
-    branch: user?.branch?._id || '',
+    branch: user?.branch?._id || user?.branch || '',
     address: user?.address || '',
   });
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
   const onChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
   };
 
+  // ---- Password generator ----
+  function generatePassword() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%';
+    let pwd = '';
+    const arr = new Uint32Array(12);
+    if (typeof window !== 'undefined' && window.crypto && window.crypto.getRandomValues) {
+      window.crypto.getRandomValues(arr);
+      for (let i = 0; i < 12; i++) pwd += chars[arr[i] % chars.length];
+    } else {
+      for (let i = 0; i < 12; i++) pwd += chars[Math.floor(Math.random() * chars.length)];
+    }
+    return pwd;
+  }
+
   const handleSubmit = (e) => {
     e.preventDefault();
-    const branch = USER_BRANCHES.find((b) => b._id === form.branch);
-    onSave({
-      ...form,
-      branch: branch || null,
-    });
+
+    if (!form.fullName.trim()) { toast.error('ሙሉ ስም ያስፈልጋል'); return; }
+    if (!form.phone.trim())    { toast.error('ስልክ ቁጥር ያስፈልጋል'); return; }
+
+    if (!isEdit) {
+      if (!password || password.length < 6) {
+        toast.error('የይለፍ ቃል ቢያንስ 6 ፊደሎች መሆን አለበት');
+        return;
+      }
+    }
+
+    const payload = {
+      fullName: form.fullName.trim(),
+      phone: form.phone.trim(),
+      email: form.email.trim(),
+      role: form.role,
+      branch: form.branch || null,
+      address: form.address.trim(),
+    };
+
+    if (!isEdit) {
+      payload.password = password;
+      try {
+        toast.success(
+          `ተጠቃሚ ተፈጥሯል!\n📞 ${payload.phone}\n🔑 ${password}`,
+          { duration: 20000 }
+        );
+      } catch {}
+    }
+
+    onSave(payload);
   };
 
   return (
@@ -401,9 +457,42 @@ function UserForm({ user, onSave, onCancel }) {
         />
       </FormField>
 
-      {!user && (
-        <div className="p-3 rounded-lg bg-blue-50 text-xs text-blue-700">
-          ℹ️ አዲስ ተጠቃሚ ሲፈጠር የመጀመሪያ ፓስወርድ በራስ-ሰር ይመነጫል።
+      {!isEdit && (
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">
+            የይለፍ ቃል *
+          </label>
+          <div className="relative">
+            <input
+              type={showPassword ? 'text' : 'password'}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              minLength={6}
+              placeholder="ቢያንስ 6 ፊደሎች"
+              className="w-full pl-3 pr-28 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand"
+            />
+            <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                className="px-2 py-1 rounded text-[11px] font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+                title={showPassword ? 'ደብቅ' : 'አሳይ'}
+              >
+                {showPassword ? 'ደብቅ' : 'አሳይ'}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setPassword(generatePassword()); setShowPassword(true); }}
+                className="px-2 py-1 rounded text-[11px] font-medium bg-brand/10 text-brand hover:bg-brand/20"
+              >
+                ፍጠር
+              </button>
+            </div>
+          </div>
+          <p className="text-[11px] text-gray-500 mt-1">
+            "ፍጠር" ቁልፍን በመጫን ጠንካራ የይለፍ ቃል መፍጠር ይችላሉ። የይለፍ ቃሉን ለሻጩ ያሳውቁ።
+          </p>
         </div>
       )}
 
@@ -414,7 +503,7 @@ function UserForm({ user, onSave, onCancel }) {
         </button>
         <button type="submit"
           className="flex-1 px-4 py-2.5 rounded-lg bg-brand text-white font-semibold hover:bg-brand-dark transition">
-          {user ? 'አስተካክል' : 'ጨምር'}
+          {isEdit ? 'አስተካክል' : 'ጨምር'}
         </button>
       </div>
     </form>
@@ -431,8 +520,11 @@ function FormField({ label, children }) {
 }
 
 function UserView({ user }) {
-  const roleInfo = USER_ROLES[user.role];
-  const RoleIcon = ROLE_ICONS[user.role] || User;
+  const roleInfo = USER_ROLES[user.role] || {
+    label: user.role ? String(user.role).charAt(0).toUpperCase() + String(user.role).slice(1) : '—',
+    color: 'gray',
+  };
+  const RoleIcon = ROLE_ICONS?.[user.role] || User;
 
   return (
     <div>
@@ -447,7 +539,7 @@ function UserView({ user }) {
           <div className="flex items-center gap-1 mt-1">
             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-${roleInfo.color}-100 text-${roleInfo.color}-700`}>
               <RoleIcon size={10} />
-              {roleInfo.label}
+              {roleInfo?.label || user?.role || '—'}
             </span>
             <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
               user.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'

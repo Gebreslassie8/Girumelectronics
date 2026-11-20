@@ -1,13 +1,13 @@
 ﻿'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/components/providers/AuthProvider';
 import {
   Plus, Search, Package, DollarSign, TrendingUp, AlertTriangle,
   Calendar, Phone, MapPin, User, Building2, X,
 } from 'lucide-react';
 import { formatETB, formatDate } from '@/lib/utils';
-import { MOCK_INVENTORY, SUPPLIERS, INVENTORY_BRANCHES } from '@/lib/mockInventory';
+import { apiFetch } from '@/lib/api';
 import Card from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
@@ -18,7 +18,12 @@ import toast from 'react-hot-toast';
 
 export default function InventoryPage() {
   const { user } = useAuth();
-  const [items, setItems] = useState(MOCK_INVENTORY);
+
+  const [items, setItems] = useState([]);
+  const [branches, setBranches] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
   const [search, setSearch] = useState('');
   const [branchFilter, setBranchFilter] = useState('all');
   const [showModal, setShowModal] = useState(false);
@@ -29,95 +34,124 @@ export default function InventoryPage() {
 
   const canManage = user?.role === 'admin' || user?.role === 'seller';
 
-  // ✅ Get user's branch ID
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      apiFetch('/inventory').catch(() => []),
+      apiFetch('/branches').catch(() => []),
+    ])
+      .then(([inv, brs]) => {
+        if (!cancelled) {
+          setItems(Array.isArray(inv) ? inv : []);
+          setBranches(Array.isArray(brs) ? brs : []);
+        }
+      })
+      .catch((err) => { if (!cancelled) setError(err.message); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
   const userBranchId = useMemo(() => {
     if (!user?.branch) return null;
     return typeof user.branch === 'object' ? user.branch._id : user.branch;
   }, [user]);
 
-  // ✅ Role-based base data
   const roleFiltered = useMemo(() => {
     let result = items;
-
-    // Seller — የራሱ ቅርንጫፍ ብቻ
     if (user?.role === 'seller' && userBranchId) {
-      result = result.filter((i) => i.branch?._id === userBranchId);
+      result = result.filter((i) => (i.branch?._id || i.branch) === userBranchId);
     }
-
     return result;
   }, [items, user, userBranchId]);
 
-  // Filter
   const filtered = useMemo(() => {
     return roleFiltered.filter((i) => {
       const q = search.toLowerCase();
       const matchSearch =
-        i.itemType.toLowerCase().includes(q) ||
-        i.itemCode.toLowerCase().includes(q) ||
+        (i.itemType || '').toLowerCase().includes(q) ||
+        (i.itemCode || '').toLowerCase().includes(q) ||
         (i.supplier || '').toLowerCase().includes(q);
-      const matchBranch = branchFilter === 'all' || i.branch?._id === branchFilter;
+      const matchBranch = branchFilter === 'all' ||
+        (i.branch?._id || i.branch) === branchFilter;
       return matchSearch && matchBranch;
     });
   }, [roleFiltered, search, branchFilter]);
 
-  // ✅ Stats — ሚና-ተኮር
   const stats = useMemo(() => {
     const total = roleFiltered.length;
-    const totalValue = roleFiltered.reduce((s, i) => s + i.totalPrice, 0);
-    const totalQuantity = roleFiltered.reduce((s, i) => s + i.quantity, 0);
-    const lowStock = roleFiltered.filter((i) => i.quantity < 10).length;
+    const totalValue = roleFiltered.reduce((s, i) => s + (i.totalPrice || 0), 0);
+    const totalQuantity = roleFiltered.reduce((s, i) => s + (i.quantity || 0), 0);
+    const lowStock = roleFiltered.filter((i) => (i.quantity || 0) < 10).length;
     return { total, totalValue, totalQuantity, lowStock };
   }, [roleFiltered]);
 
-  // Delete
   const handleDeleteClick = (item) => setDeleteTarget(item);
 
   const handleDeleteConfirm = async () => {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      await new Promise((r) => setTimeout(r, 500));
-      setItems(items.filter((i) => i._id !== deleteTarget._id));
+      await apiFetch('/inventory/' + deleteTarget._id, { method: 'DELETE' });
+      setItems((prev) => prev.filter((i) => i._id !== deleteTarget._id));
       toast.success('ዕቃ ተሰርዟል');
       setDeleteTarget(null);
-    } catch (_) {
-      toast.error('ስህተት ተፈጥሯል');
+    } catch (err) {
+      toast.error(err.message || 'ስህተት ተፈጥሯል');
     } finally {
       setDeleting(false);
     }
   };
 
-  // Save
-  const handleSave = (data) => {
-    if (editingItem) {
-      setItems(items.map((i) => i._id === editingItem._id ? { ...i, ...data } : i));
-      toast.success('ዕቃ ተስተካክሏል');
-    } else {
-      const newItem = {
-        ...data,
-        _id: 'inv' + (items.length + 1),
-        itemCode: `INV-2026-${String(items.length + 1).padStart(4, '0')}`,
-        totalPrice: data.quantity * data.unitPrice,
-        receivedDate: new Date().toISOString().split('T')[0],
-        createdBy: { fullName: user?.fullName || 'User' },
-      };
-      setItems([newItem, ...items]);
-      toast.success('ዕቃ ተቀብሏል');
+  const handleSave = async (data) => {
+    try {
+      if (editingItem) {
+        const updated = await apiFetch('/inventory/' + editingItem._id, {
+          method: 'PATCH',
+          body: JSON.stringify(data),
+        });
+        setItems((prev) => prev.map((i) => (i._id === editingItem._id ? updated : i)));
+        toast.success('ዕቃ ተስተካክሏል');
+      } else {
+        const created = await apiFetch('/inventory', {
+          method: 'POST',
+          body: JSON.stringify(data),
+        });
+        setItems((prev) => [created, ...prev]);
+        toast.success('ዕቃ ተቀብሏል');
+      }
+      setShowModal(false);
+      setEditingItem(null);
+    } catch (err) {
+      toast.error(err.message || 'ስህተት ተፈጥሯል');
     }
-    setShowModal(false);
-    setEditingItem(null);
   };
+
+  if (loading) {
+    return (
+      <div className="p-8 text-center text-gray-500">
+        <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+        <p className="text-sm">በመጫን ላይ...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-8 text-center">
+        <p className="text-red-600 font-medium">ስህተት ተፈጥሯል</p>
+        <p className="text-sm text-gray-500 mt-1">{error}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-800">መጋዘን</h1>
           <p className="text-sm text-gray-500 mt-1">
             {filtered.length} ዕቃዎች · {formatETB(stats.totalValue)} ጠቅላላ ዋጋ
           </p>
-          {/* ✅ Seller — branch display */}
           {user?.role === 'seller' && userBranchId && (
             <p className="text-xs text-brand font-medium mt-1 flex items-center gap-1">
               <Building2 size={12} />
@@ -132,7 +166,6 @@ export default function InventoryPage() {
         )}
       </div>
 
-      {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard label="ጠቅላላ ዕቃዎች" value={stats.total} icon={Package} color="bg-blue-500" />
         <StatCard label="ጠቅላላ ዋጋ" value={formatETB(stats.totalValue)} icon={DollarSign} color="bg-green-500" />
@@ -140,7 +173,6 @@ export default function InventoryPage() {
         <StatCard label="ዝቅተኛ ክምችት" value={stats.lowStock} icon={AlertTriangle} color="bg-yellow-500" />
       </div>
 
-      {/* Filters */}
       <Card padding="sm">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="relative">
@@ -150,19 +182,18 @@ export default function InventoryPage() {
               placeholder="ፈልግ (ዕቃ፣ ኮድ፣ አቅራቢ)..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm"
+              className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800"
             />
           </div>
 
-          {/* ✅ Branch filter — Admin ብቻ */}
           {user?.role === 'admin' ? (
             <select
               value={branchFilter}
               onChange={(e) => setBranchFilter(e.target.value)}
-              className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm bg-white"
+              className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm bg-white text-gray-800"
             >
               <option value="all">ሁሉም ቅርንጫፎች</option>
-              {INVENTORY_BRANCHES.map((b) => <option key={b._id} value={b._id}>{b.name}</option>)}
+              {branches.map((b) => <option key={b._id} value={b._id}>{b.name}</option>)}
             </select>
           ) : (
             <div className="px-3 py-2 rounded-lg bg-blue-50 text-blue-700 text-sm flex items-center gap-2">
@@ -175,7 +206,6 @@ export default function InventoryPage() {
         </div>
       </Card>
 
-      {/* Table */}
       <Card padding="none">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -201,54 +231,52 @@ export default function InventoryPage() {
                         <Package size={28} className="text-gray-400" />
                       </div>
                       <p className="text-gray-500 text-sm">ምንም ዕቃ አልተገኘም</p>
-                      {user?.role === 'seller' && userBranchId && (
-                        <p className="text-xs text-gray-400">
-                          ቅርንጫፍ: {typeof user.branch === 'object' ? user.branch.name : 'ቅርንጫፍ'}
-                        </p>
-                      )}
                     </div>
                   </td>
                 </tr>
               ) : (
-                filtered.map((item) => (
-                  <tr key={item._id} className="border-b border-gray-100 hover:bg-gray-50">
-                    <td className="px-4 py-3 font-mono text-xs text-brand font-medium">{item.itemCode}</td>
-                    <td className="px-4 py-3">
-                      <p className="font-medium text-gray-800">{item.itemType}</p>
-                      <p className="text-xs text-gray-500 truncate max-w-xs">{item.description}</p>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <span className={`font-semibold ${item.quantity < 10 ? 'text-red-600' : 'text-gray-800'}`}>
-                        {item.quantity}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-right text-gray-700">{formatETB(item.unitPrice)}</td>
-                    <td className="px-4 py-3 text-right font-semibold text-gray-800">{formatETB(item.totalPrice)}</td>
-                    <td className="px-4 py-3 text-gray-600">{item.supplier || '-'}</td>
-                    <td className="px-4 py-3">
-                      <span className="inline-flex px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-xs">
-                        {item.branch?.name || '-'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-xs text-gray-500">{formatDate(item.receivedDate)}</td>
-                    <td className="px-4 py-3">
-                      <ActionButtons
-                        onView={() => setViewItem(item)}
-                        onEdit={() => { setEditingItem(item); setShowModal(true); }}
-                        onDelete={() => handleDeleteClick(item)}
-                        canEdit={canManage}
-                        canDelete={canManage}
-                      />
-                    </td>
-                  </tr>
-                ))
+                filtered.map((item) => {
+                  const branchName = item.branch?.name || '-';
+                  const createdName = item.createdBy?.fullName || '-';
+                  return (
+                    <tr key={item._id} className="border-b border-gray-100 hover:bg-gray-50">
+                      <td className="px-4 py-3 font-mono text-xs text-brand font-medium">{item.itemCode}</td>
+                      <td className="px-4 py-3">
+                        <p className="font-medium text-gray-800">{item.itemType}</p>
+                        <p className="text-xs text-gray-500 truncate max-w-xs">{item.description}</p>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <span className={'font-semibold ' + ((item.quantity || 0) < 10 ? 'text-red-600' : 'text-gray-800')}>
+                          {item.quantity}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right text-gray-700">{formatETB(item.unitPrice || 0)}</td>
+                      <td className="px-4 py-3 text-right font-semibold text-gray-800">{formatETB(item.totalPrice || 0)}</td>
+                      <td className="px-4 py-3 text-gray-600">{item.supplier || '-'}</td>
+                      <td className="px-4 py-3">
+                        <span className="inline-flex px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-xs">
+                          {branchName}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-gray-500">{formatDate(item.receivedDate)}</td>
+                      <td className="px-4 py-3">
+                        <ActionButtons
+                          onView={() => setViewItem(item)}
+                          onEdit={() => { setEditingItem(item); setShowModal(true); }}
+                          onDelete={() => handleDeleteClick(item)}
+                          canEdit={canManage}
+                          canDelete={canManage}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
       </Card>
 
-      {/* Add/Edit Modal */}
       <Modal
         isOpen={showModal}
         onClose={() => { setShowModal(false); setEditingItem(null); }}
@@ -257,13 +285,13 @@ export default function InventoryPage() {
       >
         <ItemForm
           item={editingItem}
+          branches={branches}
           onSave={handleSave}
           onCancel={() => { setShowModal(false); setEditingItem(null); }}
           currentUser={user}
         />
       </Modal>
 
-      {/* View Modal */}
       <Modal
         isOpen={!!viewItem}
         onClose={() => setViewItem(null)}
@@ -272,7 +300,6 @@ export default function InventoryPage() {
         {viewItem && <ItemView item={viewItem} />}
       </Modal>
 
-      {/* Delete Confirmation */}
       <ConfirmModal
         isOpen={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
@@ -280,7 +307,7 @@ export default function InventoryPage() {
         title="ዕቃ ይሰረዝ?"
         message="ይህን የመጋዘን ዕቃ መሰረዝ ይፈልጋሉ?"
         itemName={deleteTarget?.itemType}
-        itemType={`${deleteTarget?.itemCode || ''} · ${deleteTarget?.quantity || 0} pcs`}
+        itemType={(deleteTarget?.itemCode || '') + ' · ' + (deleteTarget?.quantity || 0) + ' pcs'}
         confirmLabel="አዎ፣ ሰርዝ"
         cancelLabel="ተወው"
         loading={deleting}
@@ -290,8 +317,6 @@ export default function InventoryPage() {
   );
 }
 
-// ============ Sub-components ============
-
 function StatCard({ label, value, icon: Icon, color }) {
   return (
     <Card padding="sm">
@@ -300,7 +325,7 @@ function StatCard({ label, value, icon: Icon, color }) {
           <p className="text-xs text-gray-500">{label}</p>
           <p className="text-xl font-bold text-gray-800 mt-1">{value}</p>
         </div>
-        <div className={`p-2.5 rounded-lg ${color}`}>
+        <div className={'p-2.5 rounded-lg ' + color}>
           <Icon size={20} className="text-white" />
         </div>
       </div>
@@ -308,13 +333,12 @@ function StatCard({ label, value, icon: Icon, color }) {
   );
 }
 
-function ItemForm({ item, onSave, onCancel, currentUser }) {
+function ItemForm({ item, branches, onSave, onCancel, currentUser }) {
   const isSeller = currentUser?.role === 'seller';
 
-  // ✅ Seller — branch ቋሚ
   const defaultBranch = isSeller && currentUser?.branch
     ? (typeof currentUser.branch === 'object' ? currentUser.branch._id : currentUser.branch)
-    : (item?.branch?._id || 'b1');
+    : (item?.branch?._id || item?.branch || '');
 
   const [form, setForm] = useState({
     itemType: item?.itemType || '',
@@ -335,11 +359,14 @@ function ItemForm({ item, onSave, onCancel, currentUser }) {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    const branch = INVENTORY_BRANCHES.find((b) => b._id === form.branch);
     onSave({
-      ...form,
+      itemType: form.itemType,
+      quantity: form.quantity,
+      unitPrice: form.unitPrice,
       totalPrice: form.quantity * form.unitPrice,
-      branch: branch || { _id: form.branch, name: 'ቦሌ ቅርንጫፍ' },
+      supplier: form.supplier || undefined,
+      description: form.description || undefined,
+      branch: form.branch || null,
     });
   };
 
@@ -347,48 +374,51 @@ function ItemForm({ item, onSave, onCancel, currentUser }) {
     <form onSubmit={handleSubmit} className="space-y-4">
       <FormField label="የዕቃ ዓይነት *">
         <input name="itemType" value={form.itemType} onChange={onChange} required
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm"
+          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
         />
       </FormField>
 
       <div className="grid grid-cols-2 gap-3">
         <FormField label="ብዛት *">
           <input type="number" name="quantity" value={form.quantity} onChange={onChange} required min={0}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
           />
         </FormField>
         <FormField label="የመግዣ ዋጋ *">
           <input type="number" name="unitPrice" value={form.unitPrice} onChange={onChange} required min={0}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
           />
         </FormField>
       </div>
 
       <FormField label="አቅራቢ">
-        <select name="supplier" value={form.supplier} onChange={onChange}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand text-sm">
-          <option value="">— ይምረጡ —</option>
-          {SUPPLIERS.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
+        <input name="supplier" value={form.supplier} onChange={onChange}
+          placeholder="የአቅራቢ ስም"
+          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
+        />
       </FormField>
 
-      {/* ✅ Seller — branch ቋሚ */}
-      <FormField label="ቅርንጫፍ *">
+      <FormField label="ቅርንጫፍ">
         {isSeller ? (
           <div className="w-full px-3 py-2 rounded-lg bg-blue-50 text-blue-700 text-sm font-medium">
             {typeof currentUser.branch === 'object' ? currentUser.branch?.name : 'ቅርንጫፍ'}
           </div>
         ) : (
           <select name="branch" value={form.branch} onChange={onChange}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand text-sm">
-            {INVENTORY_BRANCHES.map((b) => <option key={b._id} value={b._id}>{b.name}</option>)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800">
+            <option value="">— ይምረጡ —</option>
+            {branches.length === 0 ? (
+              <option value="" disabled>ቅርንጫፍ በመጫን ላይ...</option>
+            ) : (
+              branches.map((b) => <option key={b._id} value={b._id}>{b.name}</option>)
+            )}
           </select>
         )}
       </FormField>
 
       <FormField label="መግለጫ">
         <textarea name="description" value={form.description} onChange={onChange} rows={2}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm resize-none"
+          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm resize-none text-gray-800 bg-white"
         />
       </FormField>
 
@@ -435,8 +465,8 @@ function ItemView({ item }) {
 
       <div className="grid grid-cols-3 gap-2 py-4">
         <StatBox label="ብዛት" value={item.quantity} icon={Package} color="text-purple-600 bg-purple-50" />
-        <StatBox label="የመግዣ" value={formatETB(item.unitPrice)} icon={DollarSign} color="text-blue-600 bg-blue-50" />
-        <StatBox label="ጠቅላላ" value={formatETB(item.totalPrice)} icon={TrendingUp} color="text-green-600 bg-green-50" />
+        <StatBox label="የመግዣ" value={formatETB(item.unitPrice || 0)} icon={DollarSign} color="text-blue-600 bg-blue-50" />
+        <StatBox label="ጠቅላላ" value={formatETB(item.totalPrice || 0)} icon={TrendingUp} color="text-green-600 bg-green-50" />
       </div>
 
       <div className="space-y-3 pt-3 border-t border-gray-100 text-sm">
@@ -451,10 +481,11 @@ function ItemView({ item }) {
 }
 
 function StatBox({ label, value, icon: Icon, color }) {
+  const parts = color.split(' ');
   return (
-    <div className={`rounded-lg p-2.5 text-center ${color.split(' ')[1]}`}>
+    <div className={'rounded-lg p-2.5 text-center ' + parts[1]}>
       <div className="flex items-center justify-center mb-1">
-        <Icon size={16} className={color.split(' ')[0]} />
+        <Icon size={16} className={parts[0]} />
       </div>
       <p className="text-xs font-bold text-gray-800">{value}</p>
       <p className="text-[10px] text-gray-500">{label}</p>

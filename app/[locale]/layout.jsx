@@ -1,33 +1,36 @@
-﻿import { NextIntlClientProvider } from 'next-intl';
-import { getMessages, setRequestLocale } from 'next-intl/server';
-import { Toaster } from 'react-hot-toast';
+import { NextIntlClientProvider } from 'next-intl';
+import { getMessages } from 'next-intl/server';
+import { notFound } from 'next/navigation';
 import { routing } from '@/i18n/routing';
-import QueryProvider from '@/components/providers/QueryProvider';
-import AuthProvider from '@/components/providers/AuthProvider';
+import { AuthProvider } from '@/components/providers/AuthProvider';
 import ProfileProvider from '@/components/providers/ProfileProvider';
+import { Toaster } from 'react-hot-toast';
 import '../globals.css';
 
-export function generateStaticParams() {
-  return routing.locales.map((locale) => ({ locale }));
-}
+export const metadata = {
+  title: 'ግሩም ኤሌክትሮኒክስ',
+  description: 'Girum Electronics — modern stove and appliance management',
+};
 
 export default async function LocaleLayout({ children, params }) {
   const { locale } = await params;
-  setRequestLocale(locale);
+
+  if (!routing.locales.includes(locale)) {
+    notFound();
+  }
+
   const messages = await getMessages();
 
   return (
-    <html lang={locale}>
-      <body>
+    <html lang={locale} suppressHydrationWarning>
+      <body className="min-h-screen bg-gray-50 text-gray-900 antialiased">
         <NextIntlClientProvider messages={messages}>
-          <QueryProvider>
-            <AuthProvider>
-              <ProfileProvider>
-                {children}
-                <Toaster position="top-right" />
-              </ProfileProvider>
-            </AuthProvider>
-          </QueryProvider>
+          <AuthProvider>
+            <ProfileProvider>
+              {children}
+              <Toaster position="top-right" />
+            </ProfileProvider>
+          </AuthProvider>
         </NextIntlClientProvider>
       </body>
     </html>

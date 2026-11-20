@@ -1,155 +1,273 @@
-﻿'use client';
+'use client';
 
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import {
-  LayoutDashboard, Package, ShoppingCart, FileText,
-  BarChart3, Building2, Users, LogOut, X, User,
-  Wallet, UserCircle, Settings, Bell, History,
-} from 'lucide-react';
-import { cn } from '@/lib/utils';
 import { useAuth } from '@/components/providers/AuthProvider';
+import {
+  LayoutDashboard, Users, UserCog, Warehouse, Package, ShoppingCart,
+  Receipt, Building2, Wallet, TrendingDown, BarChart3, ShoppingBag,
+  Bell, Activity, Settings, X, ShieldCheck,
+} from 'lucide-react';
 
-// ✅ ሁሉም items ልዩ `id` አላቸው
-const NAV_GROUPS = [
+// =====================================================================
+// MENU STRUCTURE
+// =====================================================================
+const MENU = [
+  { href: '/dashboard', key: 'dashboard', fallback: 'ዳሽቦርድ', icon: LayoutDashboard,
+    roles: ['admin', 'seller', 'cashier', 'storekeeper', 'customer'] },
+  { href: '/dashboard/users', key: 'users', fallback: 'ተጠቃሚዎች', icon: Users, roles: ['admin'] },
+  { href: '/dashboard/employees', key: 'employees', fallback: 'ሠራተኞች', icon: UserCog, roles: ['admin'] },
+  { href: '/dashboard/inventory', key: 'warehouse', fallback: 'መጋዘን', icon: Warehouse,
+    roles: ['admin', 'storekeeper'] },
+  { href: '/dashboard/products', key: 'products', fallback: 'የሱቅ እቃዎች', icon: Package,
+    roles: ['admin', 'seller', 'storekeeper'] },
+  { href: '/dashboard/orders', key: 'orders', fallback: 'ትዕዛዞች', icon: ShoppingCart,
+    roles: ['admin', 'seller', 'cashier', 'customer'] },
+  { href: '/dashboard/receipts', key: 'receipts', fallback: 'ደረሰኞች', icon: Receipt,
+    roles: ['admin', 'seller', 'cashier', 'customer'] },
+  { href: '/dashboard/branches', key: 'branches', fallback: 'ቅርንጫፎች', icon: Building2, roles: ['admin'] },
+  { href: '/dashboard/warranty', key: 'warranty', fallback: 'ዋስትና', icon: ShieldCheck,
+    roles: ['admin', 'seller', 'cashier', 'storekeeper', 'customer'] },
   {
-    titleKey: 'sidebar.main',
-    items: [
-      { id: 'dashboard',   href: '/dashboard',              labelKey: 'dashboard',  icon: LayoutDashboard, roles: ['admin', 'seller', 'customer'] },
-      { id: 'users',       href: '/dashboard/users',        labelKey: 'users',      icon: UserCircle,      roles: ['admin'] },
-      { id: 'employees',   href: '/dashboard/employees',    labelKey: 'employees',  icon: Users,           roles: ['admin'] },
-      { id: 'inventory',   href: '/dashboard/inventory',    labelKey: 'inventory',  icon: Package,         roles: ['admin', 'seller'] },
-      { id: 'products',    href: '/dashboard/products',     labelKey: 'products',   icon: ShoppingCart,    roles: ['admin', 'seller'] },
-      { id: 'myProducts',  href: '/dashboard/my-products',  labelKey: 'myProducts', icon: History,         roles: ['customer'] },
-      { id: 'orders',      href: '/dashboard/orders',       labelKey: 'orders',     icon: FileText,        roles: ['admin', 'seller', 'customer'] },
-      { id: 'receipts',    href: '/dashboard/receipts',     labelKey: 'receipts',   icon: FileText,        roles: ['admin', 'seller', 'customer'] },
-      { id: 'branches',    href: '/dashboard/branches',     labelKey: 'branches',   icon: Building2,       roles: ['admin'] },
+    key: 'finance', fallback: 'ፋይናንስ', icon: Wallet, roles: ['admin', 'seller'],
+    children: [
+      { href: '/dashboard/expenses', key: 'expenses', fallback: 'ወጪዎች', icon: TrendingDown, roles: ['admin', 'seller'] },
+      { href: '/dashboard/analytics', key: 'analytics', fallback: 'ትንተና', icon: BarChart3, roles: ['admin', 'seller'] },
+      { href: '/dashboard/sold-items', key: 'soldItems', fallback: 'የተሸጡ እቃዎች', icon: ShoppingBag, roles: ['admin', 'seller'] },
     ],
   },
   {
-    titleKey: 'sidebar.finance',
-    items: [
-      { id: 'expenses',   href: '/dashboard/expenses',  labelKey: 'expenses',  icon: Wallet,    roles: ['admin', 'seller'] },
-      { id: 'analytics',  href: '/dashboard/analytics', labelKey: 'analytics', icon: BarChart3, roles: ['admin', 'seller'] },
-    ],
-  },
-  {
-    titleKey: 'sidebar.other',
-    items: [
-      { id: 'notifications', href: '/dashboard/notifications', labelKey: 'notifications', icon: Bell,     roles: ['admin', 'seller', 'customer'] },
-      { id: 'activity',      href: '/dashboard/activity',      labelKey: 'activity',      icon: History,  roles: ['admin'] },
-      { id: 'settings',      href: '/dashboard/settings',      labelKey: 'settings',      icon: Settings, roles: ['admin'] },
+    key: 'more', fallback: 'ሌላ', icon: Settings,
+    roles: ['admin', 'seller', 'cashier', 'storekeeper', 'customer'],
+    children: [
+      { href: '/dashboard/notifications', key: 'notifications', fallback: 'ማሳወቂያዎች', icon: Bell,
+        roles: ['admin', 'seller', 'cashier', 'storekeeper', 'customer'] },
+      { href: '/dashboard/activity', key: 'activity', fallback: 'እንቅስቃሴ', icon: Activity, roles: ['admin'] },
+      { href: '/dashboard/settings', key: 'settings', fallback: 'ቅንብሮች', icon: Settings, roles: ['admin'] },
     ],
   },
 ];
 
-export default function Sidebar({ open, onClose }) {
+export default function Sidebar({ open = false, onClose = () => {} }) {
   const pathname = usePathname();
-  const { logout, user } = useAuth();
+  const { user, token } = useAuth();
   const t = useTranslations('nav');
-  const tSidebar = useTranslations('sidebar');
+  const role = user?.role || 'admin';
+  const [unreadCount, setUnreadCount] = useState(0);
 
-  const role = user?.role || 'customer';
+  const loadUnreadCount = useCallback(async () => {
+    try {
+      const headers = {};
+      if (token) headers.Authorization = `Bearer ${token}`;
 
-  const filteredGroups = NAV_GROUPS
-    .map((group) => ({
-      ...group,
-      items: group.items.filter((item) => item.roles.includes(role)),
-    }))
-    .filter((group) => group.items.length > 0);
+      const res = await fetch('/api/notifications', {
+        headers,
+        credentials: 'include',
+        cache: 'no-store',
+      });
+      if (!res.ok) return;
+
+      const data = await res.json();
+      const list = Array.isArray(data) ? data : data.notifications || [];
+      const count = list.filter((item) => !(item.read ?? item.isRead)).length;
+      setUnreadCount(count);
+    } catch {
+      // keep existing count on transient network error
+    }
+  }, [token]);
+
+  useEffect(() => {
+    loadUnreadCount();
+    const interval = setInterval(loadUnreadCount, 30000);
+    return () => clearInterval(interval);
+  }, [loadUnreadCount, pathname]);
+
+  const tr = (key, fallback) => {
+    try {
+      const v = t(key);
+      return v && v !== key ? v : fallback;
+    } catch {
+      return fallback;
+    }
+  };
+
+  const canSee = (item) => !item.roles || item.roles.includes(role);
+  const isActive = (href) => pathname === href || pathname.startsWith(href + '/');
+  const parentIsActive = (item) => item.children?.some((c) => isActive(c.href)) || false;
+
+  const renderNavIcon = (item, active) => {
+    const IconComp = item.icon;
+    if (item.key !== 'notifications') {
+      return <IconComp size={16} className={active ? '' : 'text-gray-500'} />;
+    }
+
+    return (
+      <span className="relative inline-flex items-center justify-center shrink-0">
+        <IconComp size={16} className={active ? '' : 'text-gray-500'} />
+        {unreadCount > 0 && (
+          <span
+            className={`absolute -top-1.5 -right-1.5 w-2 h-2 rounded-full ring-2 ${
+              active ? 'bg-amber-300 ring-brand' : 'bg-amber-700 ring-white'
+            }`}
+          />
+        )}
+      </span>
+    );
+  };
 
   return (
     <>
-      {open && (
-        <div
-          className="fixed inset-0 bg-black/40 backdrop-blur-sm z-30 md:hidden"
-          onClick={onClose}
-        />
-      )}
+      {/* Mobile overlay */}
+      <div
+        className={`fixed inset-0 z-40 bg-black/40 md:hidden transition-opacity ${
+          open ? 'opacity-100' : 'opacity-0 pointer-events-none'
+        }`}
+        onClick={onClose}
+      />
 
       <aside
-        className={cn(
-          'fixed md:static inset-y-0 left-0 z-40 w-64 bg-white border-r border-gray-200 flex flex-col transition-transform duration-300',
-          open ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
-        )}
+        className={`fixed md:sticky top-0 z-50 md:z-0 h-screen w-64 flex-shrink-0 bg-white border-r border-gray-200 flex flex-col transition-transform md:translate-x-0 ${
+          open ? 'translate-x-0' : '-translate-x-full'
+        }`}
       >
-        <div className="p-4 border-b border-gray-200 flex items-center justify-between">
-          <Link href="/dashboard" className="flex items-center gap-2.5 group">
-            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-brand to-brand-dark flex items-center justify-center text-white font-bold text-lg shadow-sm group-hover:scale-105 transition">
-              ግ
-            </div>
-            <div>
-              <h1 className="text-base font-bold text-gray-800 leading-tight">ግሩም ምጣድ</h1>
-              <p className="text-[10px] text-gray-500">Grum Stove</p>
-            </div>
-          </Link>
-
-          <button
-            className="md:hidden text-gray-400 hover:text-gray-600"
-            onClick={onClose}
+        {/* Header */}
+        <div className="px-4 h-16 border-b border-gray-100 flex items-center justify-between">
+          <Link
+            href="/dashboard"
+            className="font-bold text-lg text-brand rounded-md px-1 -mx-1
+              focus:outline-none focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-1"
           >
-            <X size={20} />
+            {tr('brand', 'ግሩም ኤሌክትሮኒክስ')}
+          </Link>
+          <button
+            onClick={onClose}
+            className="md:hidden p-1 rounded-md text-gray-600
+              focus:outline-none focus:bg-green-600 focus:text-white
+              focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-1"
+            aria-label="close"
+          >
+            <X size={18} />
           </button>
         </div>
 
-        <nav className="flex-1 p-2 overflow-y-auto">
-          {filteredGroups.map((group, gi) => (
-            <div key={group.titleKey} className={gi > 0 ? 'mt-3' : ''}>
-              <p className="px-3 py-1.5 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
-                {tSidebar(group.titleKey.replace('sidebar.', ''))}
-              </p>
-              {group.items.map((item) => {
-                const active = pathname === item.href;
-                const Icon = item.icon;
-                const label = t(item.labelKey);
-                return (
-                  <Link
-                    key={item.id}          // ✅ ልዩ ID
-                    href={item.href}
-                    onClick={onClose}
-                    className={cn(
-                      'flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium mb-0.5 transition-all group relative',
-                      active
-                        ? 'bg-brand text-white shadow-sm'
-                        : 'text-gray-700 hover:bg-gray-100 hover:text-brand'
-                    )}
+        {/* Nav */}
+        <nav className="flex-1 overflow-y-auto py-3">
+          {MENU.filter(canSee).map((item) => {
+            const label = tr(item.key, item.fallback);
+
+            if (item.children) {
+              const childVisible = item.children.filter(canSee);
+              if (childVisible.length === 0) return null;
+              const groupActive = parentIsActive(item);
+              const groupHasUnread =
+                item.key === 'more' &&
+                childVisible.some((c) => c.key === 'notifications') &&
+                unreadCount > 0;
+
+              return (
+                <div key={item.key} className="mb-1">
+                  <div
+                    className={`px-4 py-2 text-[11px] font-semibold uppercase tracking-wide flex items-center justify-between ${
+                      groupActive ? 'text-green-700' : 'text-gray-500'
+                    }`}
                   >
-                    {active && (
-                      <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 bg-white rounded-r" />
+                    <span className="flex items-center gap-2">
+                      <item.icon size={14} />
+                      {label}
+                    </span>
+                    {groupHasUnread && (
+                      <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-amber-100 text-amber-800">
+                        {unreadCount > 99 ? '99+' : unreadCount}
+                      </span>
                     )}
-                    <Icon size={17} className={active ? '' : 'group-hover:scale-110 transition'} />
-                    <span className="flex-1">{label}</span>
-                  </Link>
-                );
-              })}
-            </div>
-          ))}
+                  </div>
+                  <ul>
+                    {childVisible.map((c) => {
+                      const active = isActive(c.href);
+                      const showBadge = c.key === 'notifications' && unreadCount > 0;
+
+                      return (
+                        <li key={c.key}>
+                          <Link
+                            href={c.href}
+                            onClick={onClose}
+                            className={`flex items-center justify-between gap-2 mx-2 px-3 py-2 rounded-lg text-sm
+                              focus:outline-none
+                              focus:bg-green-600 focus:text-white
+                              focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-1
+                              ${
+                              active
+                                ? 'bg-brand text-white shadow-sm'
+                                : 'text-gray-700'
+                            }`}
+                          >
+                            <span className="flex items-center gap-3 min-w-0">
+                              {renderNavIcon(c, active)}
+                              <span className="truncate">{tr(c.key, c.fallback)}</span>
+                            </span>
+                            {showBadge && (
+                              <span
+                                className={`px-1.5 py-0.5 text-[11px] font-bold rounded-full shrink-0 ${
+                                  active
+                                    ? 'bg-white text-brand'
+                                    : 'bg-amber-700 text-white'
+                                }`}
+                              >
+                                {unreadCount > 99 ? '99+' : unreadCount}
+                              </span>
+                            )}
+                          </Link>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              );
+            }
+
+            const active = isActive(item.href);
+            const showBadge = item.key === 'notifications' && unreadCount > 0;
+
+            return (
+              <Link
+                key={item.key}
+                href={item.href}
+                onClick={onClose}
+                className={`flex items-center justify-between gap-2 mx-2 px-3 py-2 rounded-lg text-sm
+                  focus:outline-none
+                  focus:bg-green-600 focus:text-white
+                  focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-1
+                  ${
+                  active
+                    ? 'bg-brand text-white shadow-sm'
+                    : 'text-gray-700'
+                }`}
+              >
+                <span className="flex items-center gap-3 min-w-0">
+                  {renderNavIcon(item, active)}
+                  <span className="truncate">{label}</span>
+                </span>
+                {showBadge && (
+                  <span
+                    className={`px-1.5 py-0.5 text-[11px] font-bold rounded-full shrink-0 ${
+                      active
+                        ? 'bg-white text-brand'
+                        : 'bg-amber-700 text-white'
+                    }`}
+                  >
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </span>
+                )}
+              </Link>
+            );
+          })}
         </nav>
 
-        <div className="p-3 border-t border-gray-200">
-          <Link
-            href="/dashboard/profile"
-            className="flex items-center gap-2.5 p-2 rounded-lg bg-gray-50 mb-2 hover:bg-gray-100 transition"
-          >
-            <div className="w-9 h-9 rounded-full bg-brand text-white flex items-center justify-center font-semibold text-sm flex-shrink-0">
-              {user?.fullName?.charAt(0)?.toUpperCase() || 'U'}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-800 truncate">
-                {user?.fullName || 'ተጠቃሚ'}
-              </p>
-              <p className="text-[10px] text-gray-500 truncate">
-                {user?.role || ''}
-              </p>
-            </div>
-          </Link>
-          <button
-            onClick={logout}
-            className="flex items-center justify-center gap-2 w-full text-sm text-red-600 hover:bg-red-50 rounded-lg py-2 transition font-medium"
-          >
-            <LogOut size={16} /> {t('logout')}
-          </button>
+        {/* Footer */}
+        <div className="p-3 border-t border-gray-100 text-xs text-gray-400">
+          © {new Date().getFullYear()} {tr('brand', 'ግሩም ኤሌክትሮኒክስ')}
         </div>
       </aside>
     </>

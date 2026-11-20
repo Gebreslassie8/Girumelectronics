@@ -1,74 +1,114 @@
 ﻿'use client';
 
 import { createContext, useContext, useEffect, useState } from 'react';
-import { useRouter } from '@/i18n/navigation';
-import { useTranslations } from 'next-intl';
-import { auth } from '@/lib/auth';
-import { mockLogin, mockRegister } from '@/lib/mockAuth';
-import toast from 'react-hot-toast';
+import { useRouter } from 'next/navigation';
+import { apiFetch } from '@/lib/api';
 
-const AuthContext = createContext(null);
+const AuthCtx = createContext(null);
 
-export default function AuthProvider({ children }) {
+export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
-  const tLogin = useTranslations('auth.login');
-  const tRegister = useTranslations('auth.register');
 
+  // Load user from localStorage on mount — SAFE
   useEffect(() => {
-    const cached = auth.getUser();
-    if (cached) setUser(cached);
+    if (typeof window === 'undefined') {
+      setLoading(false);
+      return;
+    }
+    try {
+      const cached = localStorage.getItem('user');
+      if (!cached || cached === 'undefined' || cached === 'null') {
+        localStorage.removeItem('user');
+        localStorage.removeItem('token');
+      } else {
+        const parsed = JSON.parse(cached);
+        if (parsed && typeof parsed === 'object' && parsed._id) {
+          setUser(parsed);
+        } else {
+          localStorage.removeItem('user');
+        }
+      }
+    } catch (err) {
+      console.warn('[AuthProvider] bad cached user, clearing:', err.message);
+      localStorage.removeItem('user');
+      localStorage.removeItem('token');
+    }
     setLoading(false);
   }, []);
 
+  const updateUser = (patch) => {
+    setUser((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev, ...patch };
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('user', JSON.stringify(next));
+      }
+      return next;
+    });
+  };
+
   const login = async (phone, password) => {
-    try {
-      const { token, user: userData } = await mockLogin(phone, password);
-      auth.setToken(token);
-      auth.setUser(userData);
-      setUser(userData);
-      toast.success(tLogin('success'));
-      router.push('/dashboard');
-      return { token, user: userData };
-    } catch (err) {
-      toast.error(err.message || tLogin('error'));
-      throw err;
+    const data = await apiFetch('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ phone, password }),
+    });
+
+    if (!data || !data.user || !data.token) {
+      throw new Error(data?.error || 'Login failed — no user in response');
     }
+
+    setUser(data.user);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('user', JSON.stringify(data.user));
+      localStorage.setItem('token', data.token);
+    }
+    router.push('/dashboard');
+    router.refresh();
+    return data.user;
   };
 
-  const register = async (payload) => {
-    try {
-      // ✅ ሁልጊዜ customer — admin/seller በ admin ብቻ ይፈጠራሉ
-      const safePayload = { ...payload, role: 'customer' };
-      const { token, user: userData } = await mockRegister(safePayload);
-      auth.setToken(token);
-      auth.setUser(userData);
-      setUser(userData);
-      toast.success(tRegister('success'));
-      router.push('/dashboard');
-      return { token, user: userData };
-    } catch (err) {
-      toast.error(err.message || tRegister('error'));
-      throw err;
+  const signup = async (payload) => {
+    const data = await apiFetch('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+
+    if (!data || !data.user || !data.token) {
+      throw new Error(data?.error || 'Registration failed — no user in response');
     }
+
+    setUser(data.user);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('user', JSON.stringify(data.user));
+      localStorage.setItem('token', data.token);
+    }
+    router.push('/dashboard');
+    router.refresh();
+    return data.user;
   };
 
-  const logout = () => {
-    auth.logout();
+  const logout = async () => {
+    try {
+      await apiFetch('/auth/logout', { method: 'POST' });
+    } catch {}
     setUser(null);
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('user');
+      localStorage.removeItem('token');
+    }
     router.push('/login');
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthCtx.Provider
+      value={{ user, setUser, updateUser, login, signup, logout, loading }}
+    >
       {children}
-    </AuthContext.Provider>
+    </AuthCtx.Provider>
   );
 }
 
-export const useAuth = () => {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used inside AuthProvider');
-  return ctx;
-};
+export const useAuth = () => useContext(AuthCtx);
+export default AuthProvider;

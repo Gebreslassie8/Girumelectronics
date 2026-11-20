@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Menu, Bell, ChevronDown } from 'lucide-react';
 import { useTranslations, useLocale } from 'next-intl';
 import { notificationsStore } from '@/lib/notificationsStore';
@@ -19,16 +19,62 @@ export default function Header({ onMenuClick, title }) {
 
   const t = useTranslations('nav');
   const locale = useLocale();
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const { profile, refresh } = useProfile();
 
-  // ----- Live unread badge -----
-  const [unread, setUnread] = useState(notificationsStore.get().unread);
+  // ----- Live unread badge (store + live /api/notifications sync) -----
+  const [unread, setUnread] = useState(() => notificationsStore.get()?.unread ?? 0);
+
+  const syncUnreadFromApi = useCallback(async () => {
+    try {
+      const headers = {};
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      const res = await fetch('/api/notifications', {
+        headers,
+        credentials: 'include',
+        cache: 'no-store',
+      });
+      if (!res.ok) return;
+
+      const data = await res.json();
+      const list = Array.isArray(data) ? data : data.notifications || [];
+      const count = list.filter((item) => !(item.read ?? item.isRead)).length;
+      setUnread(count);
+
+      if (typeof notificationsStore.setUnread === 'function') {
+        notificationsStore.setUnread(count);
+      }
+    } catch {
+      // keep current badge count on transient network issues
+    }
+  }, [token]);
+
   useEffect(() => {
-    const unsub = notificationsStore.subscribe((s) => setUnread(s.unread));
-    setUnread(notificationsStore.get().unread);
-    return unsub;
-  }, []);
+    const unsub =
+      typeof notificationsStore.subscribe === 'function'
+        ? notificationsStore.subscribe((s) => {
+            if (typeof s?.unread === 'number') {
+              setUnread(s.unread);
+            }
+          })
+        : null;
+
+    if (typeof notificationsStore.get === 'function') {
+      const current = notificationsStore.get();
+      if (typeof current?.unread === 'number') {
+        setUnread(current.unread);
+      }
+    }
+
+    syncUnreadFromApi();
+    const timer = setInterval(syncUnreadFromApi, 30000);
+
+    return () => {
+      if (typeof unsub === 'function') unsub();
+      clearInterval(timer);
+    };
+  }, [syncUnreadFromApi, locale]);
 
   // ----- Re-fetch profile when language changes -----
   useEffect(() => {
@@ -46,17 +92,17 @@ export default function Header({ onMenuClick, title }) {
 
   return (
     <>
-      <header className="bg-white border-b border-gray-200 px-4 py-2.5 flex items-center justify-between sticky top-0 z-20">
+      <header className="bg-white border-b border-stone-200 px-4 py-2.5 flex items-center justify-between sticky top-0 z-20">
         {/* Left: Menu + Title */}
         <div className="flex items-center gap-3 flex-1 min-w-0">
           <button
-            className="md:hidden text-gray-600 hover:text-brand p-1.5 rounded-lg hover:bg-gray-100 transition"
+            className="md:hidden text-stone-600 hover:text-amber-800 p-1.5 rounded-lg hover:bg-stone-100 transition"
             onClick={onMenuClick}
             aria-label="Menu"
           >
             <Menu size={22} />
           </button>
-          <h2 className="text-lg font-semibold text-gray-800 truncate">{title}</h2>
+          <h2 className="text-lg font-semibold text-stone-800 truncate">{title}</h2>
         </div>
 
         {/* Right */}
@@ -70,22 +116,29 @@ export default function Header({ onMenuClick, title }) {
           <div className="relative">
             <button
               onClick={() => {
-                setShowNotifications(!showNotifications);
+                const next = !showNotifications;
+                setShowNotifications(next);
                 setShowProfile(false);
+                if (next) syncUnreadFromApi();
               }}
-              className="relative p-2 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-brand transition"
+              className="relative p-2 rounded-lg text-stone-600 hover:bg-stone-100 hover:text-amber-800 transition"
               aria-label={unread > 0 ? unread + ' አዲስ ማሳወቂያዎች' : 'ማሳወቂያዎች'}
             >
               <Bell size={20} />
               {unread > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center bg-red-500 text-white text-[10px] font-bold rounded-full ring-2 ring-white">
+                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center bg-amber-700 text-white text-[10px] font-bold rounded-full ring-2 ring-white">
                   {unread > 99 ? '99+' : unread}
                 </span>
               )}
             </button>
 
             {showNotifications && (
-              <NotificationMenu onClose={() => setShowNotifications(false)} />
+              <NotificationMenu
+                onClose={() => {
+                  setShowNotifications(false);
+                  syncUnreadFromApi();
+                }}
+              />
             )}
           </div>
 
@@ -96,13 +149,13 @@ export default function Header({ onMenuClick, title }) {
                 setShowProfile(!showProfile);
                 setShowNotifications(false);
               }}
-              className="flex items-center gap-2 p-1 pl-1 pr-2.5 rounded-full hover:bg-gray-100 transition"
+              className="flex items-center gap-2 p-1 pl-1 pr-2.5 rounded-full hover:bg-stone-100 transition"
               aria-label="Profile menu"
             >
               <div
                 className={cn(
                   'w-8 h-8 rounded-full flex items-center justify-center font-semibold text-sm text-white overflow-hidden',
-                  displayAvatar ? 'bg-gray-200' : roleColor.solid
+                  displayAvatar ? 'bg-stone-200' : roleColor.solid
                 )}
               >
                 {displayAvatar ? (
@@ -119,7 +172,7 @@ export default function Header({ onMenuClick, title }) {
               <div className="hidden md:block text-left">
                 <p
                   key={'name-' + locale}
-                  className="text-sm font-medium text-gray-800 leading-tight truncate max-w-[120px]"
+                  className="text-sm font-medium text-stone-800 leading-tight truncate max-w-[120px]"
                 >
                   {displayName}
                 </p>
@@ -134,7 +187,7 @@ export default function Header({ onMenuClick, title }) {
                 </p>
               </div>
 
-              <ChevronDown size={14} className="hidden md:block text-gray-400" />
+              <ChevronDown size={14} className="hidden md:block text-stone-400" />
             </button>
 
             {showProfile && (

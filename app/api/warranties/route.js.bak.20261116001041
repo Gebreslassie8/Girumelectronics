@@ -1,0 +1,100 @@
+// app/api/warranties/route.js
+import { NextResponse } from 'next/server';
+import mongoose from 'mongoose';
+import connectDB from '@/lib/db';
+import { Warranty } from '@/models';
+import { requireAuth, requireRole } from '@/lib/auth';
+
+// ============================================================
+// GET — list warranties (role-based scoping)
+// ============================================================
+export async function GET(req) {
+  try {
+    await connectDB();
+
+    const auth = await requireAuth(req);
+    if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
+    const query = {};
+
+    if (auth.user.role === 'customer') {
+      query.customerPhone = auth.user.phone;
+    } else if (auth.user.role === 'seller') {
+      query.branch = auth.user.branch;
+    } else if (!['admin', 'owner', 'cashier', 'storekeeper'].includes(auth.user.role)) {
+      return NextResponse.json({ error: 'ፍቃድ የለዎትም' }, { status: 403 });
+    }
+
+    const warranties = await Warranty.find(query)
+      .populate('product', 'name category code')
+      .populate('order', 'orderNumber customerName customerPhone itemType')
+      .populate('branch', 'name code')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return NextResponse.json(warranties);
+  } catch (err) {
+    console.error('[warranties GET]', err);
+    return NextResponse.json({ error: 'ስህተት ተፈጥሯል' }, { status: 500 });
+  }
+}
+
+// ============================================================
+// POST — create warranty
+// ============================================================
+export async function POST(req) {
+  try {
+    const { error } = await requireRole(req, 'admin', 'owner', 'seller', 'cashier');
+    if (error) return error;
+
+    await connectDB();
+
+    const body = await req.json().catch(() => ({}));
+    const {
+      order, product, itemType, customerName, customerPhone,
+      startDate, endDate, durationMonths, status, branch, notes,
+    } = body || {};
+
+    // Validation
+    if (!customerName || !customerName.trim()) {
+      return NextResponse.json({ error: 'የደንበኛ ስም ያስፈልጋል' }, { status: 400 });
+    }
+    if (!customerPhone || !customerPhone.trim()) {
+      return NextResponse.json({ error: 'የደንበኛ ስልክ ያስፈልጋል' }, { status: 400 });
+    }
+    if (!itemType || !itemType.trim()) {
+      return NextResponse.json({ error: 'የዕቃ ዓይነት ያስፈልጋል' }, { status: 400 });
+    }
+    if (!startDate) {
+      return NextResponse.json({ error: 'የጀመረበት ቀን ያስፈልጋል' }, { status: 400 });
+    }
+    if (!branch) {
+      return NextResponse.json({ error: 'ቅርንጫፍ ያስፈልጋል' }, { status: 400 });
+    }
+
+    const created = await Warranty.create({
+      order:          order || null,
+      product:        product || null,
+      itemType:       itemType.trim(),
+      customerName:   customerName.trim(),
+      customerPhone:  customerPhone.trim(),
+      startDate:      new Date(startDate),
+      endDate:        endDate ? new Date(endDate) : undefined,
+      durationMonths: Number(durationMonths) || 24,
+      status:         status || 'active',
+      branch,
+      notes:          (notes || '').trim(),
+    });
+
+    const populated = await Warranty.findById(created._id)
+      .populate('product', 'name category code')
+      .populate('order', 'orderNumber')
+      .populate('branch', 'name code')
+      .lean();
+
+    return NextResponse.json(populated, { status: 201 });
+  } catch (err) {
+    console.error('[warranties POST]', err);
+    return NextResponse.json({ error: err.message || 'ስህተት ተፈጥሯል' }, { status: 500 });
+  }
+}

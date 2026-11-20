@@ -1,0 +1,77 @@
+import { NextResponse } from 'next/server';
+import connectDB from '@/lib/db';
+import { Order } from '@/models';
+import { requireAuth, requireRole } from '@/lib/auth';
+
+export async function GET(req, { params }) {
+  const { id } = await params;
+  const { error } = await requireAuth(req);
+  if (error) return error;
+
+  await connectDB();
+  const order = await Order.findById(id)
+    .populate('branch', 'name code')
+    .populate('product', 'name code')
+    .populate('createdBy', 'fullName phone')
+    .lean();
+  if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+  return NextResponse.json(order);
+}
+
+export async function PATCH(req, { params }) {
+  const { id } = await params;
+  const { error } = await requireRole(req, 'admin', 'owner', 'seller');
+  if (error) return error;
+
+  try {
+    await connectDB();
+    const body = await req.json();
+
+    const order = await Order.findById(id);
+    if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+
+    const allowed = [
+      'customerName', 'customerPhone', 'address', 'itemType', 'product',
+      'quantity', 'unitPrice', 'totalPrice', 'prepayment',
+      'status', 'orderDate', 'appointmentDate', 'note', 'branch', 'measurements',
+    ];
+
+    for (const k of allowed) {
+      if (body[k] !== undefined) {
+        order[k] = body[k] === '' && k === 'branch' ? null : body[k];
+      }
+    }
+
+    if (body.quantity != null || body.unitPrice != null || body.prepayment != null) {
+      order.totalPrice = (order.quantity || 0) * (order.unitPrice || 0);
+      order.remainingPayment = Math.max(order.totalPrice - (order.prepayment || 0), 0);
+    }
+
+    await order.save();
+
+    await order.populate('branch', 'name code');
+    await order.populate('product', 'name code');
+    await order.populate('createdBy', 'fullName phone');
+
+    return NextResponse.json(order);
+  } catch (err) {
+    if (err.name === 'ValidationError') {
+      const errs = {};
+      for (const k of Object.keys(err.errors)) errs[k] = err.errors[k].message;
+      return NextResponse.json({ error: 'Validation failed', errors: errs }, { status: 400 });
+    }
+    console.error('[orders:PATCH]', err);
+    return NextResponse.json({ error: err.message || 'Update failed' }, { status: 500 });
+  }
+}
+
+export async function DELETE(req, { params }) {
+  const { id } = await params;
+  const { error } = await requireRole(req, 'admin', 'owner');
+  if (error) return error;
+
+  await connectDB();
+  const order = await Order.findByIdAndDelete(id);
+  if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+  return NextResponse.json({ ok: true });
+}

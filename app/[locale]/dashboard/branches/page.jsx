@@ -1,13 +1,13 @@
-﻿'use client';
+'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/components/providers/AuthProvider';
 import {
-  Plus, Search, Building2, Users, CheckCircle2, XCircle,
-  Phone, MapPin, User, Package, ShoppingCart,
+  Plus, Search, Edit, Trash2, Eye, Building2,
+  Users, MapPin, Phone, CheckCircle2, XCircle, DollarSign,
 } from 'lucide-react';
-import { formatDate } from '@/lib/utils';
-import { MOCK_BRANCHES, BRANCH_STATUS } from '@/lib/mockBranches';
+import { formatETB, formatDate } from '@/lib/utils';
+import { apiFetch } from '@/lib/api';
 import Card from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
@@ -18,7 +18,13 @@ import toast from 'react-hot-toast';
 
 export default function BranchesPage() {
   const { user } = useAuth();
-  const [branches, setBranches] = useState(MOCK_BRANCHES);
+
+  const [branches, setBranches] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [employees, setEmployees] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [showModal, setShowModal] = useState(false);
@@ -27,71 +33,156 @@ export default function BranchesPage() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
-  const canManage = user?.role === 'admin';
+  const canManage = user?.role === 'admin' || user?.role === 'owner';
 
-  // Filter
+  // ---- Load branches + orders + employees (for per-branch stats) ----
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      apiFetch('/branches').catch(() => []),
+      apiFetch('/orders').catch(() => []),
+      apiFetch('/employees').catch(() => []),
+    ])
+      .then(([brs, ords, emps]) => {
+        if (!cancelled) {
+          setBranches(Array.isArray(brs) ? brs : brs?.data ?? []);
+          setOrders(Array.isArray(ords) ? ords : ords?.data ?? []);
+          setEmployees(Array.isArray(emps) ? emps : emps?.data ?? []);
+        }
+      })
+      .catch((err) => { if (!cancelled) setError(err.message); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  // ---- Aggregate per-branch stats (revenue, orders, employees) ----
+  const enriched = useMemo(() => {
+    const map = new Map();
+
+    branches.forEach((b) => {
+      map.set(String(b._id), { ...b, revenue: 0, orderCount: 0, employeeCount: 0 });
+    });
+
+    orders.forEach((o) => {
+      const bid = String(o?.branch?._id ?? o?.branch ?? o?.branchId ?? '');
+      const entry = map.get(bid);
+      if (!entry) return;
+      entry.revenue += Number(o.totalPrice ?? o.total ?? 0) || 0;
+      entry.orderCount += 1;
+    });
+
+    employees.forEach((e) => {
+      const bid = String(e?.branch?._id ?? e?.branch ?? '');
+      const entry = map.get(bid);
+      if (!entry) return;
+      entry.employeeCount += 1;
+    });
+
+    return Array.from(map.values());
+  }, [branches, orders, employees]);
+
+  // ---- Filter ----
   const filtered = useMemo(() => {
-    return branches.filter((b) => {
+    return enriched.filter((b) => {
       const q = search.toLowerCase();
+      const name = b.name || '';
+      const address = b.address || b.location || '';
+      const phone = b.phone || '';
+      const code = b.code || b.branchCode || '';
       const matchSearch =
-        b.name.toLowerCase().includes(q) ||
-        b.code.toLowerCase().includes(q) ||
-        b.address.toLowerCase().includes(q) ||
-        b.phone.includes(q);
+        name.toLowerCase().includes(q) ||
+        address.toLowerCase().includes(q) ||
+        phone.includes(q) ||
+        code.toLowerCase().includes(q);
+      const isActive = b.isActive !== false;
       const matchStatus =
         statusFilter === 'all' ||
-        (statusFilter === 'active' && b.isActive) ||
-        (statusFilter === 'inactive' && !b.isActive);
+        (statusFilter === 'active' && isActive) ||
+        (statusFilter === 'inactive' && !isActive);
       return matchSearch && matchStatus;
     });
-  }, [branches, search, statusFilter]);
+  }, [enriched, search, statusFilter]);
 
-  // Stats
+  // ---- Stats ----
   const stats = useMemo(() => {
     const total = branches.length;
-    const active = branches.filter((b) => b.isActive).length;
-    const inactive = branches.filter((b) => !b.isActive).length;
-    const totalEmployees = branches.reduce((s, b) => s + (b.stats?.employees || 0), 0);
-    return { total, active, inactive, totalEmployees };
-  }, [branches]);
+    const active = branches.filter((b) => b.isActive !== false).length;
+    const totalRevenue = enriched.reduce((s, b) => s + b.revenue, 0);
+    const totalOrders = enriched.reduce((s, b) => s + b.orderCount, 0);
+    return { total, active, totalRevenue, totalOrders };
+  }, [branches, enriched]);
 
-  // Delete
+  // ---- Delete ----
   const handleDeleteClick = (branch) => setDeleteTarget(branch);
 
   const handleDeleteConfirm = async () => {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      await new Promise((r) => setTimeout(r, 500));
-      setBranches(branches.filter((b) => b._id !== deleteTarget._id));
+      await apiFetch('/branches/' + deleteTarget._id, { method: 'DELETE' });
+      setBranches((prev) => prev.filter((b) => b._id !== deleteTarget._id));
       toast.success('ቅርንጫፍ ተሰርዟል');
       setDeleteTarget(null);
-    } catch (_) {
-      toast.error('ስህተት ተፈጥሯል');
+    } catch (err) {
+      toast.error(err.message || 'ስህተት ተፈጥሯል');
     } finally {
       setDeleting(false);
     }
   };
 
-  // Save
-  const handleSave = (data) => {
-    if (editingBranch) {
-      setBranches(branches.map((b) => b._id === editingBranch._id ? { ...b, ...data } : b));
-      toast.success('ቅርንጫፍ ተስተካክሏል');
-    } else {
-      const newBranch = {
+  // ---- Save (create / edit) ----
+  const handleSave = async (data) => {
+    try {
+      // ✅ Ensure manager is a valid ObjectId string or null — never a name
+      const payload = {
         ...data,
-        _id: 'b' + (branches.length + 1),
-        code: `BR-${String(branches.length + 1).padStart(3, '0')}`,
-        createdAt: new Date().toISOString().split('T')[0],
-        stats: { employees: 0, products: 0, orders: 0 },
+        manager:
+          data.manager && typeof data.manager === 'object'
+            ? data.manager._id ?? null
+            : data.manager || null,
       };
-      setBranches([newBranch, ...branches]);
-      toast.success('ቅርንጫፍ ተጨምሯል');
+
+      if (editingBranch) {
+        const updated = await apiFetch('/branches/' + editingBranch._id, {
+          method: 'PATCH',
+          body: JSON.stringify(payload),
+        });
+        setBranches((prev) =>
+          prev.map((b) => (b._id === editingBranch._id ? { ...b, ...updated } : b))
+        );
+        toast.success('ቅርንጫፍ ተስተካክሏል');
+      } else {
+        const created = await apiFetch('/branches', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+        setBranches((prev) => [created, ...prev]);
+        toast.success('ቅርንጫፍ ተጨምሯል');
+      }
+      setShowModal(false);
+      setEditingBranch(null);
+    } catch (err) {
+      toast.error(err.message || 'ስህተት ተፈጥሯል');
     }
-    setShowModal(false);
-    setEditingBranch(null);
   };
+
+  if (loading) {
+    return (
+      <div className="p-8 text-center text-gray-500">
+        <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+        <p className="text-sm">በመጫን ላይ...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-8 text-center">
+        <p className="text-red-600 font-medium">ስህተት ተፈጥሯል</p>
+        <p className="text-sm text-gray-500 mt-1">{error}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -100,7 +191,7 @@ export default function BranchesPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-800">ቅርንጫፎች</h1>
           <p className="text-sm text-gray-500 mt-1">
-            {filtered.length} ቅርንጫፎች · {stats.totalEmployees} ሠራተኞች
+            {filtered.length} ቅርንጫፎች · ጠቅላላ ገቢ {formatETB(stats.totalRevenue)}
           </p>
         </div>
         {canManage && (
@@ -114,27 +205,27 @@ export default function BranchesPage() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard label="ጠቅላላ ቅርንጫፎች" value={stats.total} icon={Building2} color="bg-blue-500" />
         <StatCard label="ንቁ" value={stats.active} icon={CheckCircle2} color="bg-green-500" />
-        <StatCard label="ተዘግቷል" value={stats.inactive} icon={XCircle} color="bg-red-500" />
-        <StatCard label="ጠቅላላ ሠራተኞች" value={stats.totalEmployees} icon={Users} color="bg-purple-500" />
+        <StatCard label="ጠቅላላ ገቢ" value={formatETB(stats.totalRevenue)} icon={DollarSign} color="bg-purple-500" />
+        <StatCard label="ትዕዛዞች" value={stats.totalOrders} icon={Users} color="bg-orange-500" />
       </div>
 
       {/* Filters */}
       <Card padding="sm">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div className="relative">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="relative md:col-span-2">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               type="text"
-              placeholder="ፈልግ (ስም፣ ኮድ፣ አድራሻ፣ ስልክ)..."
+              placeholder="ፈልግ (ስም፣ አድራሻ፣ ስልክ)..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm"
+              className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800"
             />
           </div>
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm bg-white"
+            className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm bg-white text-gray-800"
           >
             <option value="all">ሁሉም ሁኔታዎች</option>
             <option value="active">ንቁ</option>
@@ -149,11 +240,11 @@ export default function BranchesPage() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="px-4 py-3 text-left font-semibold text-gray-700">ኮድ</th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-700">ስም</th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-700">አድራሻ</th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-700">ስልክ</th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-700">ሥራ አስኪያጅ</th>
+                <th className="px-4 py-3 text-right font-semibold text-gray-700">ገቢ</th>
+                <th className="px-4 py-3 text-right font-semibold text-gray-700">ትዕዛዞች</th>
                 <th className="px-4 py-3 text-center font-semibold text-gray-700">ሠራተኞች</th>
                 <th className="px-4 py-3 text-center font-semibold text-gray-700">ሁኔታ</th>
                 <th className="px-4 py-3 text-center font-semibold text-gray-700">ተግባር</th>
@@ -173,39 +264,51 @@ export default function BranchesPage() {
                 </tr>
               ) : (
                 filtered.map((branch) => {
-                  const status = branch.isActive ? BRANCH_STATUS.active : BRANCH_STATUS.inactive;
+                  const isActive = branch.isActive !== false;
                   return (
                     <tr key={branch._id} className="border-b border-gray-100 hover:bg-gray-50">
-                      <td className="px-4 py-3 font-mono text-xs text-brand font-medium">{branch.code}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
-                          <div className="w-8 h-8 rounded-lg bg-brand/10 flex items-center justify-center flex-shrink-0">
-                            <Building2 size={16} className="text-brand" />
+                          <div className="w-8 h-8 rounded-lg bg-brand text-white flex items-center justify-center flex-shrink-0">
+                            <Building2 size={16} />
                           </div>
-                          <span className="font-medium text-gray-800">{branch.name}</span>
+                          <div>
+                            <p className="font-medium text-gray-800">{branch.name}</p>
+                            {branch.code && (
+                              <p className="text-xs text-gray-500 font-mono">{branch.code}</p>
+                            )}
+                          </div>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-gray-600 text-xs max-w-xs truncate">
-                        {branch.address}
+                      <td className="px-4 py-3 text-gray-600">
+                        <span className="inline-flex items-center gap-1">
+                          <MapPin size={12} className="text-gray-400" />
+                          {branch.address || branch.location || '—'}
+                        </span>
                       </td>
-                      <td className="px-4 py-3 text-gray-600">{branch.phone}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <div className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
-                            <span className="text-xs font-semibold text-gray-600">
-                              {branch.manager?.fullName?.charAt(0) || '-'}
-                            </span>
-                          </div>
-                          <span className="text-gray-700 text-xs">{branch.manager?.fullName || '-'}</span>
-                        </div>
+                      <td className="px-4 py-3 text-gray-600">
+                        {branch.phone ? (
+                          <span className="inline-flex items-center gap-1">
+                            <Phone size={12} className="text-gray-400" />
+                            {branch.phone}
+                          </span>
+                        ) : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-right font-semibold text-brand">
+                        {formatETB(branch.revenue)}
+                      </td>
+                      <td className="px-4 py-3 text-right text-gray-800 font-medium">
+                        {branch.orderCount}
                       </td>
                       <td className="px-4 py-3 text-center">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 text-xs font-medium">
-                          <Users size={10} /> {branch.stats?.employees || 0}
+                        <span className="inline-flex px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 text-xs">
+                          {branch.employeeCount}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-center">
-                        <Badge color={status.color}>{status.label}</Badge>
+                        <Badge color={isActive ? 'green' : 'red'}>
+                          {isActive ? 'ንቁ' : 'ተዘግቷል'}
+                        </Badge>
                       </td>
                       <td className="px-4 py-3">
                         <ActionButtons
@@ -225,7 +328,7 @@ export default function BranchesPage() {
         </div>
       </Card>
 
-      {/* Add/Edit Modal */}
+      {/* Create / Edit modal */}
       <Modal
         isOpen={showModal}
         onClose={() => { setShowModal(false); setEditingBranch(null); }}
@@ -239,7 +342,7 @@ export default function BranchesPage() {
         />
       </Modal>
 
-      {/* View Modal */}
+      {/* View modal */}
       <Modal
         isOpen={!!viewBranch}
         onClose={() => setViewBranch(null)}
@@ -248,7 +351,7 @@ export default function BranchesPage() {
         {viewBranch && <BranchView branch={viewBranch} />}
       </Modal>
 
-      {/* Delete Confirmation */}
+      {/* Delete confirm */}
       <ConfirmModal
         isOpen={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
@@ -256,7 +359,7 @@ export default function BranchesPage() {
         title="ቅርንጫፍ ይሰረዝ?"
         message="ይህን ቅርንጫፍ መሰረዝ ይፈልጋሉ?"
         itemName={deleteTarget?.name}
-        itemType={`${deleteTarget?.code || ''} · ${deleteTarget?.address || ''}`}
+        itemType={deleteTarget?.address || deleteTarget?.phone || ''}
         confirmLabel="አዎ፣ ሰርዝ"
         cancelLabel="ተወው"
         loading={deleting}
@@ -265,8 +368,6 @@ export default function BranchesPage() {
     </div>
   );
 }
-
-// ============ Sub-components ============
 
 function StatCard({ label, value, icon: Icon, color }) {
   return (
@@ -284,13 +385,43 @@ function StatCard({ label, value, icon: Icon, color }) {
   );
 }
 
+// =====================================================================
+// BranchForm — manager is now a dropdown of REGISTERED USERS
+// =====================================================================
 function BranchForm({ branch, onSave, onCancel }) {
+  const [users, setUsers] = useState([]);
+  const [loadingUsers, setLoadingUsers] = useState(true);
+
+  // ✅ Initialize manager with the _id only (never the display name)
+  const initialManager =
+    branch?.manager == null
+      ? ''
+      : typeof branch.manager === 'object'
+        ? branch.manager._id || ''
+        : branch.manager || '';
+
   const [form, setForm] = useState({
     name: branch?.name || '',
-    address: branch?.address || '',
+    code: branch?.code || branch?.branchCode || '',
     phone: branch?.phone || '',
-    isActive: branch?.isActive ?? true,
+    address: branch?.address || branch?.location || '',
+    manager: initialManager,          // ✅ ObjectId string or ''
+    isActive: branch?.isActive !== false,
   });
+
+  // ---- Load registered users for the manager dropdown ----
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingUsers(true);
+    apiFetch('/users')
+      .then((res) => {
+        const list = Array.isArray(res) ? res : res?.data ?? res?.users ?? [];
+        if (!cancelled) setUsers(list);
+      })
+      .catch(() => { if (!cancelled) setUsers([]); })
+      .finally(() => { if (!cancelled) setLoadingUsers(false); });
+    return () => { cancelled = true; };
+  }, []);
 
   const onChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -299,42 +430,67 @@ function BranchForm({ branch, onSave, onCancel }) {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    onSave(form);
+    onSave({
+      name: form.name.trim(),
+      code: form.code.trim(),
+      phone: form.phone.trim(),
+      address: form.address.trim(),
+      // ✅ Empty string → null (default = no manager)
+      manager: form.manager || null,
+      isActive: form.isActive,
+    });
   };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <FormField label="ስም *">
-        <input
-          name="name"
-          value={form.name}
-          onChange={onChange}
-          required
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm"
-        />
-      </FormField>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <FormField label="ስም *" full>
+          <input name="name" value={form.name} onChange={onChange} required
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
+          />
+        </FormField>
+        <FormField label="ኮድ">
+          <input name="code" value={form.code} onChange={onChange}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
+          />
+        </FormField>
+        <FormField label="ስልክ">
+          <input name="phone" value={form.phone} onChange={onChange}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
+          />
+        </FormField>
+        <FormField label="አድራሻ" full>
+          <input name="address" value={form.address} onChange={onChange}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
+          />
+        </FormField>
 
-      <FormField label="አድራሻ *">
-        <input
-          name="address"
-          value={form.address}
-          onChange={onChange}
-          required
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm"
-        />
-      </FormField>
+        {/* ✅ Manager is now a select of registered users */}
+        <FormField label="ኃላፊ" full>
+          <select
+            name="manager"
+            value={form.manager}
+            onChange={onChange}
+            disabled={loadingUsers}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white disabled:bg-gray-100 disabled:text-gray-400"
+          >
+            <option value="">
+              {loadingUsers ? 'ተጠቃሚዎች በመጫን ላይ...' : '— ኃላፊ የለም (ነባሪ) —'}
+            </option>
+            {users.map((u) => (
+              <option key={u._id} value={u._id}>
+                {u.fullName || u.name || u.phone || u.email}
+                {u.role ? ` (${u.role})` : ''}
+              </option>
+            ))}
+          </select>
+          <p className="text-[11px] text-gray-500 mt-1">
+            ከተመዘገቡ ተጠቃሚዎች ይምረጡ። ባዶ ከሆነ ቅርንጫፉ ኃላፊ አይኖረውም።
+          </p>
+        </FormField>
+      </div>
 
-      <FormField label="ስልክ *">
-        <input
-          name="phone"
-          value={form.phone}
-          onChange={onChange}
-          required
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm"
-        />
-      </FormField>
-
-      <div className="flex items-center gap-2 p-3 rounded-lg bg-gray-50">
+      <label className="flex items-center gap-2 cursor-pointer text-sm">
         <input
           type="checkbox"
           name="isActive"
@@ -342,21 +498,16 @@ function BranchForm({ branch, onSave, onCancel }) {
           onChange={onChange}
           className="w-4 h-4 rounded border-gray-300 text-brand focus:ring-brand"
         />
-        <label className="text-sm text-gray-700 cursor-pointer">
-          ቅርንጫፍ ንቁ ነው
-        </label>
-      </div>
+        <span className="text-gray-700">ንቁ ቅርንጫፍ</span>
+      </label>
 
       <div className="flex gap-2 pt-2 border-t border-gray-200">
-        <button
-          type="button"
-          onClick={onCancel}
+        <button type="button" onClick={onCancel}
           className="flex-1 px-4 py-2.5 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 transition"
         >
           ሰርዝ
         </button>
-        <button
-          type="submit"
+        <button type="submit"
           className="flex-1 px-4 py-2.5 rounded-lg bg-brand text-white font-semibold hover:bg-brand-dark transition"
         >
           {branch ? 'አስተካክል' : 'ጨምር'}
@@ -366,9 +517,9 @@ function BranchForm({ branch, onSave, onCancel }) {
   );
 }
 
-function FormField({ label, children }) {
+function FormField({ label, children, full }) {
   return (
-    <div>
+    <div className={full ? 'md:col-span-2' : ''}>
       <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
       {children}
     </div>
@@ -376,61 +527,56 @@ function FormField({ label, children }) {
 }
 
 function BranchView({ branch }) {
-  const status = branch.isActive ? BRANCH_STATUS.active : BRANCH_STATUS.inactive;
+  const isActive = branch.isActive !== false;
   return (
     <div>
-      {/* Header */}
       <div className="flex items-center gap-3 pb-4 border-b border-gray-100">
-        <div className="w-14 h-14 rounded-xl bg-brand/10 flex items-center justify-center">
-          <Building2 size={28} className="text-brand" />
+        <div className="w-14 h-14 rounded-lg bg-brand text-white flex items-center justify-center">
+          <Building2 size={26} />
         </div>
         <div>
           <p className="font-bold text-gray-800 text-lg">{branch.name}</p>
-          <p className="text-sm text-gray-500 font-mono">{branch.code}</p>
+          <p className="text-sm text-gray-500">{branch.code || '—'}</p>
         </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-2 py-4">
-        <StatBox label="ሠራተኞች" value={branch.stats?.employees || 0} icon={Users} color="text-purple-600 bg-purple-50" />
-        <StatBox label="ምርቶች" value={branch.stats?.products || 0} icon={Package} color="text-blue-600 bg-blue-50" />
-        <StatBox label="ትዕዛዞች" value={branch.stats?.orders || 0} icon={ShoppingCart} color="text-green-600 bg-green-50" />
-      </div>
-
-      {/* Info */}
-      <div className="space-y-3 pt-3 border-t border-gray-100 text-sm">
-        <Row label="አድራሻ" value={branch.address} icon={MapPin} />
-        <Row label="ስልክ" value={branch.phone} icon={Phone} />
-        <Row label="ሥራ አስኪያጅ" value={branch.manager?.fullName || '-'} icon={User} />
-        <Row label="ተፈጠረ" value={formatDate(branch.createdAt)} />
+      <div className="space-y-3 pt-4 text-sm">
+        <Row label="አድራሻ" value={branch.address || branch.location || '—'} />
+        <Row label="ስልክ" value={branch.phone || '—'} />
+        <Row label="ኃላፊ" value={managerLabel(branch)} />
+        <Row label="ገቢ" value={formatETB(branch.revenue || 0)} bold color="text-brand" />
+        <Row label="ትዕዛዞች" value={branch.orderCount || 0} />
+        <Row label="ሠራተኞች" value={branch.employeeCount || 0} />
         <div className="flex justify-between items-center">
           <span className="text-gray-500">ሁኔታ:</span>
-          <Badge color={status.color}>{status.label}</Badge>
+          <Badge color={isActive ? 'green' : 'red'}>
+            {isActive ? 'ንቁ' : 'ተዘግቷል'}
+          </Badge>
         </div>
       </div>
     </div>
   );
 }
 
-function StatBox({ label, value, icon: Icon, color }) {
+function Row({ label, value, mono, bold, color }) {
   return (
-    <div className={`rounded-lg p-2.5 text-center ${color.split(' ')[1]}`}>
-      <div className="flex items-center justify-center mb-1">
-        <Icon size={16} className={color.split(' ')[0]} />
-      </div>
-      <p className="text-lg font-bold text-gray-800">{value}</p>
-      <p className="text-[10px] text-gray-500">{label}</p>
+    <div className="flex justify-between gap-3">
+      <span className="text-gray-500 flex-shrink-0">{label}:</span>
+      <span className={`text-right ${bold ? 'font-semibold' : ''} ${mono ? 'font-mono text-xs' : ''} ${color || 'text-gray-800'}`}>
+        {value}
+      </span>
     </div>
   );
 }
 
-function Row({ label, value, icon: Icon }) {
-  return (
-    <div className="flex justify-between gap-3">
-      <span className="text-gray-500 flex-shrink-0 flex items-center gap-1">
-        {Icon && <Icon size={12} />} {label}:
-      </span>
-      <span className="text-right text-gray-800">{value}</span>
-    </div>
-  );
+function managerLabel(branch) {
+  const m = branch?.manager;
+  if (!m) return '—';
+  if (typeof m === 'string') return m;
+  if (typeof m === 'object') {
+    if (m.fullName) return m.fullName;
+    if (m.name) return m.name;
+    if (m.phone) return m.phone;
+  }
+  return '—';
 }

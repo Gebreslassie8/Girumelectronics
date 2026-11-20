@@ -44,3 +44,41 @@
   @apply bg-white rounded-xl shadow-sm border border-gray-200 p-5 transition-all duration-200;
 }
 }
+/* ── Native <select> dropdown — force light mode for readability ── */
+select {
+  color-scheme: light;
+  color: #1f2937;
+  background-color: #ffffff;
+}
+
+select option {
+  color: #1f2937;
+  background-color: #ffffff;
+  padding: 8px;
+}
+/* ─────────────────────────────────────────────
+   html2canvas fix — force RGB colors
+   (Tailwind v4 uses oklch/lab which html2canvas can't parse)
+   ───────────────────────────────────────────── */
+@media screen {
+  html, body {
+    color-scheme: light;
+  }
+}
+
+/* Fallback: if any element ends up with oklch/lab,
+   override with safe equivalent hex values */
+[class*="bg-brand"], .bg-brand {
+  background-color: #1e40af !important;
+}
+.text-brand, .text-brand-dark {
+  color: #1e40af !important;
+}
+.bg-gray-50 { background-color: #f9fafb !important; }
+.bg-gray-100 { background-color: #f3f4f6 !important; }
+.text-gray-500 { color: #6b7280 !important; }
+.text-gray-700 { color: #374151 !important; }
+.text-gray-800 { color: #1f2937 !important; }
+.border-gray-100 { border-color: #f3f4f6 !important; }
+.border-gray-200 { border-color: #e5e7eb !important; }
+.border-gray-300 { border-color: #d1d5db !important; }

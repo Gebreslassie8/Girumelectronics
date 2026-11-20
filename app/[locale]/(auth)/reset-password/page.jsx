@@ -1,153 +1,175 @@
-﻿'use client';
+'use client';
 
-import { useState } from 'react';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
+import { useState, useEffect } from 'react';
 import { useTranslations } from 'next-intl';
-import { Link } from '@/i18n/navigation';
-import { KeyRound, Lock, Eye, EyeOff, ArrowLeft, CheckCircle2 } from 'lucide-react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
+import { Lock, Eye, EyeOff, ArrowRight, ArrowLeft, AlertCircle, CheckCircle2 } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 export default function ResetPasswordPage() {
   const t = useTranslations('auth.resetPassword');
-  const tv = useTranslations('auth.validation');
+  const router = useRouter();
   const searchParams = useSearchParams();
   const phone = searchParams.get('phone') || '';
+  const token = searchParams.get('token') || '';
 
-  const [showPassword, setShowPassword] = useState(false);
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [showPw, setShowPw] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [done, setDone] = useState(false);
+  const [error, setError] = useState(null);
 
-  const schema = z.object({
-    code: z.string().length(6, tv('codeLength')),
-    newPassword: z.string().min(6, tv('passwordMin')),
-    confirmPassword: z.string(),
-  }).refine((d) => d.newPassword === d.confirmPassword, {
-    message: t('passwordMismatch'),
-    path: ['confirmPassword'],
-  });
+  useEffect(() => {
+    if (!phone || !token) {
+      router.replace('/forgot-password');
+    }
+  }, [phone, token, router]);
 
-  const { register, handleSubmit, formState: { errors } } = useForm({ resolver: zodResolver(schema) });
+  // Password strength: 8+ chars, at least one letter and one digit
+  const pwChecks = {
+    length: password.length >= 8,
+    letter: /[A-Za-z]/.test(password),
+    digit:  /[0-9]/.test(password),
+  };
+  const pwValid = pwChecks.length && pwChecks.letter && pwChecks.digit;
+  const match  = password.length > 0 && password === confirm;
 
-  const onSubmit = async (data) => {
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError(null);
+
+    if (!pwValid) {
+      setError('የይለፍ ቃል ቢያንስ 8 ፊደሎች፣ አንድ ፊደል እና አንድ አሃዝ መያዝ አለበት');
+      return;
+    }
+    if (!match) {
+      setError(t('passwordMismatch') || 'የይለፍ ቃሎች አይመሳሰሉም');
+      return;
+    }
+
     setLoading(true);
     try {
-      // TODO: POST /api/auth/reset-password
-      console.log({ phone, ...data });
-      await new Promise((r) => setTimeout(r, 1000));
-      setDone(true);
-    } catch (_) {} finally {
+      const res = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, token, password }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'የይለፍ ቃል መቀየር አልተሳካም');
+
+      toast.success(t('success') || 'የይለፍ ቃል ተቀይሯል');
+      router.push('/login');
+    } catch (err) {
+      setError(err.message || t('error'));
+      toast.error(err.message || t('error'));
+    } finally {
       setLoading(false);
     }
   };
 
-  if (done) {
-    return (
-      <div className="text-center">
-        <div className="w-16 h-16 rounded-full bg-green-50 flex items-center justify-center mx-auto mb-4">
-          <CheckCircle2 size={32} className="text-green-600" />
-        </div>
-        <h1 className="text-2xl font-bold text-gray-800 mb-2">{t('success')}</h1>
-        <Link
-          href="/login"
-          className="inline-flex items-center justify-center gap-2 mt-6 w-full px-4 py-3 rounded-lg bg-brand text-white font-semibold hover:bg-brand-dark transition"
-        >
-          {t('backToLogin')}
-        </Link>
-      </div>
-    );
-  }
-
   return (
-    <div>
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-800 mb-2">{t('title')}</h1>
-        <p className="text-gray-600">{t('subtitle')}</p>
-      </div>
+    <div className="max-w-md mx-auto">
+      <h1 className="text-2xl font-bold">{t('title') || 'አዲስ የይለፍ ቃል'}</h1>
+      <p className="text-sm text-gray-500 mt-1">{t('subtitle') || 'አዲስ የይለፍ ቃል ይምረጡ'}</p>
 
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-        {/* Code */}
+      <form onSubmit={handleSubmit} className="mt-6 space-y-4">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">{t('code')}</label>
+          <label className="block text-xs font-medium text-gray-600 mb-1">
+            {t('newPassword') || 'አዲስ የይለፍ ቃል'}
+          </label>
           <div className="relative">
-            <KeyRound size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
-              type="text"
-              placeholder={t('codePlaceholder')}
-              maxLength={6}
-              {...register('code')}
-              className={`w-full pl-10 pr-3 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-brand transition tracking-widest text-center font-mono text-lg ${
-                errors.code ? 'border-red-500' : 'border-gray-300'
-              }`}
-            />
-          </div>
-          {errors.code && <p className="text-sm text-red-600 mt-1">{errors.code.message}</p>}
-        </div>
-
-        {/* New Password */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">{t('newPassword')}</label>
-          <div className="relative">
-            <Lock size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              type={showPassword ? 'text' : 'password'}
-              placeholder={t('newPasswordPlaceholder')}
-              {...register('newPassword')}
-              className={`w-full pl-10 pr-10 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-brand transition ${
-                errors.newPassword ? 'border-red-500' : 'border-gray-300'
-              }`}
+              type={showPw ? 'text' : 'password'}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder={t('newPasswordPlaceholder') || 'ቢያንስ 8 ፊደሎች'}
+              className="w-full pl-10 pr-10 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm"
+              required
+              disabled={loading}
             />
             <button
               type="button"
-              onClick={() => setShowPassword(!showPassword)}
+              onClick={() => setShowPw((v) => !v)}
               className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              tabIndex={-1}
             >
-              {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
             </button>
           </div>
-          {errors.newPassword && <p className="text-sm text-red-600 mt-1">{errors.newPassword.message}</p>}
+
+          {/* Strength checklist */}
+          <div className="mt-2 space-y-1">
+            {[
+              { ok: pwChecks.length, label: 'ቢያንስ 8 ፊደሎች' },
+              { ok: pwChecks.letter, label: 'ቢያንስ አንድ ፊደል' },
+              { ok: pwChecks.digit,  label: 'ቢያንስ አንድ አሃዝ' },
+            ].map((c) => (
+              <p key={c.label} className={`text-[11px] flex items-center gap-1 ${c.ok ? 'text-green-600' : 'text-gray-400'}`}>
+                <CheckCircle2 size={11} />
+                {c.label}
+              </p>
+            ))}
+          </div>
         </div>
 
-        {/* Confirm */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">{t('confirmPassword')}</label>
+          <label className="block text-xs font-medium text-gray-600 mb-1">
+            {t('confirmPassword') || 'የይለፍ ቃል ያረጋግጡ'}
+          </label>
           <div className="relative">
-            <Lock size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
-              type="password"
-              placeholder={t('confirmPasswordPlaceholder')}
-              {...register('confirmPassword')}
-              className={`w-full pl-10 pr-3 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-brand transition ${
-                errors.confirmPassword ? 'border-red-500' : 'border-gray-300'
-              }`}
+              type={showConfirm ? 'text' : 'password'}
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              placeholder={t('confirmPasswordPlaceholder') || 'የይለፍ ቃሉን እንደገና ያስገቡ'}
+              className="w-full pl-10 pr-10 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm"
+              required
+              disabled={loading}
             />
+            <button
+              type="button"
+              onClick={() => setShowConfirm((v) => !v)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              tabIndex={-1}
+            >
+              {showConfirm ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
           </div>
-          {errors.confirmPassword && <p className="text-sm text-red-600 mt-1">{errors.confirmPassword.message}</p>}
+          {confirm.length > 0 && !match && (
+            <p className="text-[11px] text-red-600 mt-1">{t('passwordMismatch') || 'የይለፍ ቃሎች አይመሳሰሉም'}</p>
+          )}
         </div>
+
+        {error && (
+          <div className="flex items-start gap-2 text-red-600 bg-red-50 rounded-lg p-3">
+            <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
+            <p className="text-xs">{error}</p>
+          </div>
+        )}
 
         <button
           type="submit"
-          disabled={loading}
-          className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-brand text-white font-semibold hover:bg-brand-dark transition disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled={loading || !pwValid || !match}
+          className="inline-flex items-center justify-center gap-2 w-full px-4 py-3 rounded-lg bg-brand text-white text-sm font-medium hover:bg-brand-dark transition disabled:opacity-50"
         >
-          {loading ? (
-            <>
-              <span className="animate-spin border-2 border-white border-t-transparent rounded-full w-4 h-4" />
-              {t('submitting')}
-            </>
-          ) : (
-            t('submit')
-          )}
+          {loading ? t('submitting') || 'በመቀየር ላይ…' : (t('submit') || 'የይለፍ ቃል ቀይር')}
+          {!loading && <ArrowRight size={16} />}
         </button>
+      </form>
 
+      <div className="mt-4">
         <Link
           href="/login"
-          className="flex items-center justify-center gap-2 text-sm text-gray-600 hover:text-brand"
+          className="inline-flex items-center justify-center gap-2 w-full px-4 py-3 text-gray-600 text-sm hover:text-brand transition"
         >
-          <ArrowLeft size={14} /> {t('backToLogin')}
+          <ArrowLeft size={14} />
+          {t('backToLogin') || 'ወደ መግቢያ ተመለስ'}
         </Link>
-      </form>
+      </div>
     </div>
   );
 }

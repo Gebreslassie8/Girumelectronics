@@ -2,9 +2,10 @@
 
 import { useEffect, useRef } from 'react';
 import Link from 'next/link';
+import { useParams } from 'next/navigation';
 import {
-  User, Settings, Shield, LogOut, ChevronRight,
-  HelpCircle, Bell, Wallet, BarChart3, FileText, Package,
+  User, Settings, LogOut, ChevronRight,
+  HelpCircle, Wallet, FileText, Package,
 } from 'lucide-react';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useProfile } from '@/components/providers/ProfileProvider';
@@ -12,6 +13,8 @@ import { getInitials, getRoleLabel } from '@/lib/utils';
 
 export default function ProfileMenu({ onClose, onOpenProfileModal }) {
   const ref = useRef(null);
+  const params = useParams();
+  const locale = params?.locale;
   const { user, logout } = useAuth();
   const { profile } = useProfile();
 
@@ -23,12 +26,18 @@ export default function ProfileMenu({ onClose, onOpenProfileModal }) {
     return () => document.removeEventListener('mousedown', handleClick);
   }, [onClose]);
 
+  const localizeHref = (path) => {
+    if (!locale) return path;
+    if (path === `/${locale}` || path.startsWith(`/${locale}/`)) return path;
+    return `/${locale}${path.startsWith('/') ? '' : '/'}${path}`;
+  };
+
   const displayName = profile?.fullName || user?.fullName || 'ተጠቃሚ';
   const displayPhone = profile?.phone || user?.phone || '';
   const displayAvatar = profile?.avatar || null;
   const initials = getInitials(displayName);
   const roleLabel = getRoleLabel(user?.role);
-  const role = user?.role || 'customer';
+  const role = (user?.role || 'customer').toLowerCase();
 
   const handleOpenProfile = () => {
     if (onOpenProfileModal) {
@@ -39,11 +48,12 @@ export default function ProfileMenu({ onClose, onOpenProfileModal }) {
   return (
     <div
       ref={ref}
-      className="absolute right-0 mt-2 w-72 bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden z-[60]"
+      className="absolute right-0 mt-2.5 w-72 bg-white rounded-2xl shadow-xl border border-stone-200/90 overflow-hidden z-[60]"
     >
-      <div className="p-4 bg-gradient-to-br from-brand to-brand-dark text-white">
+      {/* Header Banner (Warm Amber/Stone Gradient, No Blue) */}
+      <div className="p-4 bg-gradient-to-br from-amber-800 via-amber-700 to-stone-800 text-white">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-full bg-white/20 backdrop-blur flex items-center justify-center font-bold text-lg ring-2 ring-white/30 overflow-hidden">
+          <div className="w-12 h-12 rounded-full bg-white/15 backdrop-blur-xs flex items-center justify-center font-bold text-base ring-2 ring-amber-200/40 overflow-hidden shrink-0">
             {displayAvatar ? (
               <img src={displayAvatar} alt={displayName} className="w-full h-full object-cover" />
             ) : (
@@ -51,107 +61,127 @@ export default function ProfileMenu({ onClose, onOpenProfileModal }) {
             )}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="font-bold truncate">{displayName}</p>
-            <p className="text-xs text-blue-100 truncate">{displayPhone}</p>
+            <p className="font-bold text-sm truncate">{displayName}</p>
+            {displayPhone && (
+              <p className="text-xs text-amber-100/90 truncate mt-0.5">{displayPhone}</p>
+            )}
           </div>
         </div>
-        <div className="mt-3 flex items-center gap-2 flex-wrap">
-          <span className="inline-flex px-2 py-0.5 rounded-full bg-white/20 text-[10px] font-medium">
+
+        <div className="mt-3 flex items-center gap-1.5 flex-wrap">
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-white/15 text-[11px] font-medium text-amber-50">
             {roleLabel}
           </span>
           {user?.branch && (
-            <span className="inline-flex px-2 py-0.5 rounded-full bg-white/20 text-[10px] font-medium">
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-stone-950/25 text-[11px] font-medium text-stone-100">
               {typeof user.branch === 'object' ? user.branch.name : 'ቅርንጫፍ'}
             </span>
           )}
         </div>
       </div>
 
-      <div className="p-2 max-h-80 overflow-y-auto">
+      {/* Menu Items */}
+      <div className="p-2 max-h-80 overflow-y-auto space-y-0.5">
         <button
           type="button"
           onClick={handleOpenProfile}
-          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-700 hover:bg-gray-50 hover:text-brand transition group text-left"
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-stone-700 hover:bg-amber-50/80 hover:text-amber-900 transition group text-left"
         >
-          <User size={16} className="text-gray-400 group-hover:text-brand transition" />
-          <span className="flex-1">የእኔ መገለጫ</span>
-          <ChevronRight size={14} className="text-gray-300" />
+          <span className="w-8 h-8 rounded-lg bg-stone-100 group-hover:bg-amber-100 text-stone-600 group-hover:text-amber-800 flex items-center justify-center transition shrink-0">
+            <User size={15} />
+          </span>
+          <span className="flex-1 truncate">የእኔ መገለጫ</span>
+          <ChevronRight size={14} className="text-stone-400 group-hover:text-amber-800 group-hover:translate-x-0.5 transition" />
         </button>
 
         {role === 'admin' && (
-          <>
-            <Link href="/dashboard/settings" onClick={onClose} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-700 hover:bg-gray-50 hover:text-brand transition group">
-              <Settings size={16} className="text-gray-400 group-hover:text-brand transition" />
-              <span className="flex-1">ቅንብሮች</span>
-              <ChevronRight size={14} className="text-gray-300" />
-            </Link>
-            <Link href="/dashboard/users" onClick={onClose} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-700 hover:bg-gray-50 hover:text-brand transition group">
-              <Shield size={16} className="text-gray-400 group-hover:text-brand transition" />
-              <span className="flex-1">ተጠቃሚዎች</span>
-              <ChevronRight size={14} className="text-gray-300" />
-            </Link>
-            <Link href="/dashboard/analytics" onClick={onClose} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-700 hover:bg-gray-50 hover:text-brand transition group">
-              <BarChart3 size={16} className="text-gray-400 group-hover:text-brand transition" />
-              <span className="flex-1">ትንተና</span>
-              <ChevronRight size={14} className="text-gray-300" />
-            </Link>
-          </>
+          <Link
+            href={localizeHref('/dashboard/settings')}
+            onClick={onClose}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-stone-700 hover:bg-amber-50/80 hover:text-amber-900 transition group"
+          >
+            <span className="w-8 h-8 rounded-lg bg-stone-100 group-hover:bg-amber-100 text-stone-600 group-hover:text-amber-800 flex items-center justify-center transition shrink-0">
+              <Settings size={15} />
+            </span>
+            <span className="flex-1 truncate">ቅንብሮች</span>
+            <ChevronRight size={14} className="text-stone-400 group-hover:text-amber-800 group-hover:translate-x-0.5 transition" />
+          </Link>
         )}
 
         {role === 'seller' && (
-          <>
-            <Link href="/dashboard/analytics" onClick={onClose} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-700 hover:bg-gray-50 hover:text-brand transition group">
-              <BarChart3 size={16} className="text-gray-400 group-hover:text-brand transition" />
-              <span className="flex-1">ትንተና</span>
-              <ChevronRight size={14} className="text-gray-300" />
-            </Link>
-            <Link href="/dashboard/expenses" onClick={onClose} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-700 hover:bg-gray-50 hover:text-brand transition group">
-              <Wallet size={16} className="text-gray-400 group-hover:text-brand transition" />
-              <span className="flex-1">ወጪዎች</span>
-              <ChevronRight size={14} className="text-gray-300" />
-            </Link>
-          </>
+          <Link
+            href={localizeHref('/dashboard/expenses')}
+            onClick={onClose}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-stone-700 hover:bg-amber-50/80 hover:text-amber-900 transition group"
+          >
+            <span className="w-8 h-8 rounded-lg bg-stone-100 group-hover:bg-amber-100 text-stone-600 group-hover:text-amber-800 flex items-center justify-center transition shrink-0">
+              <Wallet size={15} />
+            </span>
+            <span className="flex-1 truncate">ወጪዎች</span>
+            <ChevronRight size={14} className="text-stone-400 group-hover:text-amber-800 group-hover:translate-x-0.5 transition" />
+          </Link>
         )}
 
         {role === 'customer' && (
           <>
-            <Link href="/dashboard/orders" onClick={onClose} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-700 hover:bg-gray-50 hover:text-brand transition group">
-              <FileText size={16} className="text-gray-400 group-hover:text-brand transition" />
-              <span className="flex-1">የእኔ ትዕዛዞች</span>
-              <ChevronRight size={14} className="text-gray-300" />
+            <Link
+              href={localizeHref('/dashboard/orders')}
+              onClick={onClose}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-stone-700 hover:bg-amber-50/80 hover:text-amber-900 transition group"
+            >
+              <span className="w-8 h-8 rounded-lg bg-stone-100 group-hover:bg-amber-100 text-stone-600 group-hover:text-amber-800 flex items-center justify-center transition shrink-0">
+                <FileText size={15} />
+              </span>
+              <span className="flex-1 truncate">የእኔ ትዕዛዞች</span>
+              <ChevronRight size={14} className="text-stone-400 group-hover:text-amber-800 group-hover:translate-x-0.5 transition" />
             </Link>
-            <Link href="/dashboard/my-products" onClick={onClose} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-700 hover:bg-gray-50 hover:text-brand transition group">
-              <Package size={16} className="text-gray-400 group-hover:text-brand transition" />
-              <span className="flex-1">የገዙት ምርቶች</span>
-              <ChevronRight size={14} className="text-gray-300" />
+            <Link
+              href={localizeHref('/dashboard/my-products')}
+              onClick={onClose}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-stone-700 hover:bg-amber-50/80 hover:text-amber-900 transition group"
+            >
+              <span className="w-8 h-8 rounded-lg bg-stone-100 group-hover:bg-amber-100 text-stone-600 group-hover:text-amber-800 flex items-center justify-center transition shrink-0">
+                <Package size={15} />
+              </span>
+              <span className="flex-1 truncate">የገዙት ምርቶች</span>
+              <ChevronRight size={14} className="text-stone-400 group-hover:text-amber-800 group-hover:translate-x-0.5 transition" />
             </Link>
           </>
         )}
 
-        <Link href="/dashboard/notifications" onClick={onClose} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-700 hover:bg-gray-50 hover:text-brand transition group">
-          <Bell size={16} className="text-gray-400 group-hover:text-brand transition" />
-          <span className="flex-1">ማሳወቂያዎች</span>
-          <ChevronRight size={14} className="text-gray-300" />
-        </Link>
-        <Link href="/dashboard/help" onClick={onClose} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-700 hover:bg-gray-50 hover:text-brand transition group">
-          <HelpCircle size={16} className="text-gray-400 group-hover:text-brand transition" />
-          <span className="flex-1">እርዳታ</span>
-          <ChevronRight size={14} className="text-gray-300" />
+        <Link
+          href={localizeHref('/dashboard/help')}
+          onClick={onClose}
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-stone-700 hover:bg-amber-50/80 hover:text-amber-900 transition group"
+        >
+          <span className="w-8 h-8 rounded-lg bg-stone-100 group-hover:bg-amber-100 text-stone-600 group-hover:text-amber-800 flex items-center justify-center transition shrink-0">
+            <HelpCircle size={15} />
+          </span>
+          <span className="flex-1 truncate">እርዳታ</span>
+          <ChevronRight size={14} className="text-stone-400 group-hover:text-amber-800 group-hover:translate-x-0.5 transition" />
         </Link>
       </div>
 
-      <div className="p-2 border-t border-gray-100">
+      {/* Sign Out */}
+      <div className="p-2 border-t border-stone-100 bg-stone-50/40">
         <button
-          onClick={() => { logout(); onClose(); }}
-          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-red-600 hover:bg-red-50 transition font-medium"
+          type="button"
+          onClick={() => {
+            logout();
+            onClose();
+          }}
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-red-700 hover:bg-red-50 transition"
         >
-          <LogOut size={16} />
+          <span className="w-8 h-8 rounded-lg bg-red-100/70 text-red-700 flex items-center justify-center shrink-0">
+            <LogOut size={15} />
+          </span>
           <span className="flex-1 text-left">ውጣ</span>
         </button>
       </div>
 
-      <div className="px-4 py-2 bg-gray-50 border-t border-gray-100 text-center">
-        <p className="text-[10px] text-gray-400">ግሩም ምጣድ v1.0.0</p>
+      {/* Footer */}
+      <div className="px-4 py-2 bg-stone-50 border-t border-stone-100 text-center">
+        <p className="text-[10px] text-stone-400 font-medium">ግሩም ምጣድ v1.0.0</p>
       </div>
     </div>
   );

@@ -1,25 +1,33 @@
-// app/api/auth/login/route.js
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import { User } from '@/models';
 import { signToken } from '@/lib/jwt';
 
+function normalizeEmail(e) {
+  return String(e || '').trim().toLowerCase();
+}
+
+function isValidEmail(e) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+}
+
 export async function POST(req) {
   try {
     await connectDB();
-    const { phone, password } = await req.json().catch(() => ({}));
+    const { email: rawEmail, password } = await req.json().catch(() => ({}));
+    const email = normalizeEmail(rawEmail);
 
-    if (!phone || !password) {
+    if (!email || !password || !isValidEmail(email)) {
       return NextResponse.json(
-        { error: 'ስልክ እና ፓስወርድ ያስፈልጋሉ' },
+        { error: 'ትክክለኛ ኢሜይል እና ፓስወርድ ያስፈልጋሉ' },
         { status: 400 }
       );
     }
 
-    const user = await User.findOne({ phone }).select('+password');
+    const user = await User.findOne({ email }).select('+password');
     if (!user || !user.isActive) {
       return NextResponse.json(
-        { error: 'የተሳሳተ ስልክ ወይም ፓስወርድ' },
+        { error: 'የተሳሳተ ኢሜይል ወይም ፓስወርድ' },
         { status: 401 }
       );
     }
@@ -27,13 +35,13 @@ export async function POST(req) {
     const ok = await user.comparePassword(password);
     if (!ok) {
       return NextResponse.json(
-        { error: 'የተሳሳተ ስልክ ወይም ፓስወርድ' },
+        { error: 'የተሳሳተ ኢሜይል ወይም ፓስወርድ' },
         { status: 401 }
       );
     }
 
-    user.lastLogin = new Date();
-    await user.save();
+    const lastLogin = new Date();
+    await User.updateOne({ _id: user._id }, { $set: { lastLogin } });
 
     const token = await signToken({ sub: user._id.toString(), role: user.role });
 
@@ -45,7 +53,7 @@ export async function POST(req) {
       role: user.role,
       branch: user.branch,
       avatar: user.avatar,
-      lastLogin: user.lastLogin,
+      lastLogin,
     };
 
     const res = NextResponse.json({ user: safeUser, token });

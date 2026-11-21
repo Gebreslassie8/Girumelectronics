@@ -49,10 +49,11 @@ export function AuthProvider({ children }) {
     });
   };
 
-  const login = async (phone, password) => {
+  const login = async (email, password) => {
+    const normalizedEmail = String(email || '').trim().toLowerCase();
     const data = await apiFetch('/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ phone, password }),
+      body: JSON.stringify({ email: normalizedEmail, password }),
     });
 
     if (!data || !data.user || !data.token) {
@@ -70,9 +71,13 @@ export function AuthProvider({ children }) {
   };
 
   const signup = async (payload) => {
+    const normalizedPayload = {
+      ...payload,
+      ...(payload?.email ? { email: String(payload.email).trim().toLowerCase() } : {}),
+    };
     const data = await apiFetch('/auth/register', {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify(normalizedPayload),
     });
 
     if (!data || !data.user || !data.token) {

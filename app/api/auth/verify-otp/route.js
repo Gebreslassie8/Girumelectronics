@@ -1,4 +1,3 @@
-// app/api/auth/verify-otp/route.js
 import { NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import connectDB from '@/lib/db';
@@ -8,30 +7,30 @@ import { User, OtpCode } from '@/models';
 const MAX_ATTEMPTS = 5;
 const RESET_TOKEN_TTL = '10m';
 
-function normalizePhone(p) {
-  const s = String(p || '').replace(/\s+/g, '').trim();
-  if (/^\+?2519\d{8}$/.test(s)) return '0' + s.slice(-9);
-  if (/^09\d{8}$/.test(s)) return s;
-  if (/^9\d{8}$/.test(s)) return '0' + s;
-  return s;
+function normalizeEmail(e) {
+  return String(e || '').trim().toLowerCase();
+}
+
+function isValidEmail(e) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
 }
 
 export async function POST(req) {
   try {
     await connectDB();
 
-    const { phone: rawPhone, code } = await req.json().catch(() => ({}));
-    const phone = normalizePhone(rawPhone);
+    const { email: rawEmail, code } = await req.json().catch(() => ({}));
+    const email = normalizeEmail(rawEmail);
 
-    if (!/^09\d{8}$/.test(phone)) {
-      return NextResponse.json({ error: 'ትክክለኛ ስልክ ቁጥር ያስገቡ' }, { status: 400 });
+    if (!isValidEmail(email)) {
+      return NextResponse.json({ error: 'ትክክለኛ ኢሜይል ያስገቡ' }, { status: 400 });
     }
     if (!/^\d{6}$/.test(String(code || ''))) {
       return NextResponse.json({ error: '6 አሃዝ ኮድ ያስገቡ' }, { status: 400 });
     }
 
     const otp = await OtpCode.findOne({
-      phone,
+      email,
       purpose: 'reset_password',
       consumed: false,
       expiresAt: { $gt: new Date() },
@@ -47,7 +46,10 @@ export async function POST(req) {
     if (otp.attempts >= MAX_ATTEMPTS) {
       otp.consumed = true;
       await otp.save();
-      return NextResponse.json({ error: 'ብዙ ጊዜ ሞክረዋል — አዲስ ኮድ ይጠይቁ' }, { status: 429 });
+      return NextResponse.json(
+        { error: 'ብዙ ጊዜ ሞክረዋል — አዲስ ኮድ ይጠይቁ' },
+        { status: 429 }
+      );
     }
 
     const ok = await bcrypt.compare(String(code), otp.codeHash);
@@ -63,14 +65,13 @@ export async function POST(req) {
     otp.consumed = true;
     await otp.save();
 
-    const user = await User.findOne({ phone });
+    const user = await User.findOne({ email });
     if (!user) {
       return NextResponse.json({ error: 'የተሳሳተ ኮድ' }, { status: 400 });
     }
 
-    // ✅ signToken from @/lib/jwt uses `jose` (already installed)
     const resetToken = await signToken(
-      { sub: String(user._id), purpose: 'reset_password', phone },
+      { sub: String(user._id), purpose: 'reset_password', email },
       RESET_TOKEN_TTL
     );
 

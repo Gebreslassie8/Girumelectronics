@@ -37,6 +37,8 @@
     "login": {
       "title": "Welcome Back",
       "subtitle": "Sign in to your Grum Stove account",
+      "email": "Email",
+      "emailPlaceholder": "you@example.com",
       "phone": "Phone Number",
       "phonePlaceholder": "0912345678",
       "password": "Password",
@@ -55,10 +57,10 @@
       "subtitle": "Become a member of Grum Stove system",
       "fullName": "Full Name",
       "fullNamePlaceholder": "Your full name",
-      "phone": "Phone Number",
-      "phonePlaceholder": "0912345678",
-      "email": "Email (Optional)",
+      "email": "Email",
       "emailPlaceholder": "you@example.com",
+      "phone": "Phone Number (Optional)",
+      "phonePlaceholder": "0912345678",
       "password": "Password",
       "passwordPlaceholder": "At least 6 characters",
       "confirmPassword": "Confirm Password",
@@ -75,13 +77,15 @@
     },
     "forgotPassword": {
       "title": "Forgot Password?",
-      "subtitle": "Enter your phone number and we will send you a verification code",
+      "subtitle": "Enter your email address and we will send you a verification code",
+      "email": "Email",
+      "emailPlaceholder": "you@example.com",
       "phone": "Phone Number",
       "phonePlaceholder": "0912345678",
       "submit": "Send Code",
       "submitting": "Sending...",
       "backToLogin": "Back to Login",
-      "success": "Verification code sent",
+      "success": "Verification code sent to your email",
       "error": "Failed to send code",
       "noAccount": "Don't have an account?",
       "register": "Register"
@@ -100,16 +104,18 @@
       "backToLogin": "Back to Login",
       "success": "Password changed successfully",
       "error": "Password change failed",
-      "passwordMismatch": "Passwords do not match"
+      "passwordMismatch": "Passwords do not match",
+      "passwordMin": "Password must be at least 6 characters"
     },
     "validation": {
+      "emailRequired": "Email is required",
+      "emailInvalid": "Enter a valid email address",
       "phoneRequired": "Phone number is required",
       "phoneInvalid": "Enter a valid Ethiopian phone number",
       "passwordRequired": "Password is required",
       "passwordMin": "Password must be at least 6 characters",
       "nameRequired": "Full name is required",
       "nameMin": "Full name must be at least 2 characters",
-      "emailInvalid": "Enter a valid email",
       "codeRequired": "Verification code is required",
       "codeLength": "Code must be 6 digits"
     }

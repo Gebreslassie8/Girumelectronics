@@ -1,54 +1,84 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
-import mongoose from 'mongoose';
+import { Resend } from 'resend';
+import connectDB from '@/lib/db';
 import { OtpCode, User } from '@/models';
 
 const OTP_TTL_MIN = 10;
 const RESEND_WINDOW_SEC = 60;
 const MAX_PER_HOUR = 5;
 
-async function connectDb() {
-  if (mongoose.connection.readyState === 1) return;
-  await mongoose.connect(process.env.MONGODB_URI);
+const resend = process.env.RESEND_API_KEY
+  ? new Resend(process.env.RESEND_API_KEY)
+  : null;
+
+function normalizeEmail(e) {
+  return String(e || '').trim().toLowerCase();
 }
 
-function normalizePhone(p) {
-  const s = String(p || '').replace(/\s+/g, '');
-  if (/^\+?2519\d{8}$/.test(s)) return '0' + s.slice(-9);
-  if (/^09\d{8}$/.test(s)) return s;
-  if (/^9\d{8}$/.test(s)) return '0' + s;
-  return s;
+function isValidEmail(e) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
 }
 
-// Replace this with your SMS provider later
-async function sendSms(phone, code) {
-  if (process.env.NODE_ENV !== 'production') {
-    console.log(`[DEV SMS] ${phone} → OTP ${code}`);
-    return { dev: true };
+async function sendResetEmail(email, code) {
+  if (!resend) {
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[DEV EMAIL] ${email} → OTP ${code}`);
+      return { dev: true };
+    }
+    throw new Error('RESEND_API_KEY is not configured');
   }
-  throw new Error('SMS provider not configured');
+
+  const from =
+    process.env.MAIL_FROM || 'Gerum Modern Electronics Stove <onboarding@resend.dev>';
+
+  const { error } = await resend.emails.send({
+    from,
+    to: [email],
+    subject: 'የይለፍ ቃል ማረጋገጫ ኮድ — Gerum Modern Electronics Stove',
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 24px; border: 1px solid #e7e5e4; border-radius: 12px;">
+        <h2 style="margin: 0 0 12px; color: #1c1917;">የይለፍ ቃል ማረጋገጫ ኮድ (OTP)</h2>
+        <p style="margin: 0 0 16px; color: #57534e; font-size: 14px;">
+          የይለፍ ቃልዎን ለመቀየር የሚከተለውን 6 አሃዝ ኮድ ይጠቀሙ (ለ${OTP_TTL_MIN} ደቂቃ ያገለግላል):
+        </p>
+        <div style="font-size: 28px; font-weight: bold; letter-spacing: 6px; text-align: center; padding: 14px; background: #fef3c7; color: #92400e; border-radius: 8px; margin-bottom: 16px;">
+          ${code}
+        </div>
+        <p style="margin: 0; color: #78716c; font-size: 12px;">
+          ይህን ጥያቄ ያላቀረቡ ከሆነ ይህን ኢሜይል ችላ ይበሉ።
+        </p>
+      </div>
+    `,
+  });
+
+  if (error) {
+    throw new Error(error.message || 'Failed to send OTP email');
+  }
 }
 
 export async function POST(req) {
   try {
-    await connectDb();
-    const { phone: rawPhone } = await req.json();
-    const phone = normalizePhone(rawPhone);
+    await connectDB();
+    const { email: rawEmail } = await req.json().catch(() => ({}));
+    const email = normalizeEmail(rawEmail);
 
-    if (!/^09\d{8}$/.test(phone)) {
-      return NextResponse.json({ error: 'ትክክለኛ ስልክ ቁጥር ያስገቡ' }, { status: 400 });
+    if (!isValidEmail(email)) {
+      return NextResponse.json({ error: 'ትክክለኛ ኢሜይል ያስገቡ' }, { status: 400 });
     }
 
     // Rate limit: last code created in the last 60s
     const recent = await OtpCode.findOne({
-      phone,
+      email,
       purpose: 'reset_password',
       createdAt: { $gt: new Date(Date.now() - RESEND_WINDOW_SEC * 1000) },
     }).sort({ createdAt: -1 });
 
     if (recent) {
-      const wait = Math.ceil((RESEND_WINDOW_SEC * 1000 - (Date.now() - recent.createdAt.getTime())) / 1000);
+      const wait = Math.ceil(
+        (RESEND_WINDOW_SEC * 1000 - (Date.now() - recent.createdAt.getTime())) / 1000
+      );
       return NextResponse.json(
         { error: `እባክዎ ${wait} ሰከንድ በኋላ ይሞክሩ` },
         { status: 429 }
@@ -57,7 +87,7 @@ export async function POST(req) {
 
     // Rate limit: max 5/hour
     const hourCount = await OtpCode.countDocuments({
-      phone,
+      email,
       purpose: 'reset_password',
       createdAt: { $gt: new Date(Date.now() - 3600_000) },
     });
@@ -68,26 +98,26 @@ export async function POST(req) {
       );
     }
 
-    // Do NOT reveal whether the phone exists — always return 200
-    const user = await User.findOne({ phone });
+    // Do NOT reveal whether the email exists — always return 200
+    const user = await User.findOne({ email });
 
     const code = String(crypto.randomInt(100000, 1000000));
     const codeHash = await bcrypt.hash(code, 10);
     const expiresAt = new Date(Date.now() + OTP_TTL_MIN * 60_000);
 
     await OtpCode.updateMany(
-      { phone, purpose: 'reset_password', consumed: false },
+      { email, purpose: 'reset_password', consumed: false },
       { $set: { consumed: true } }
     );
 
-    await OtpCode.create({ phone, codeHash, purpose: 'reset_password', expiresAt });
+    await OtpCode.create({ email, codeHash, purpose: 'reset_password', expiresAt });
 
     try {
-      await sendSms(phone, code);
-    } catch (smsErr) {
-      console.error('[forgot-password] SMS send failed:', smsErr.message);
+      await sendResetEmail(email, code);
+    } catch (mailErr) {
+      console.error('[forgot-password] Email send failed:', mailErr.message);
       if (process.env.NODE_ENV === 'production') {
-        return NextResponse.json({ error: 'SMS መላክ አልተሳካም' }, { status: 502 });
+        return NextResponse.json({ error: 'ኢሜይል መላክ አልተሳካም' }, { status: 502 });
       }
     }
 

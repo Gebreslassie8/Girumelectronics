@@ -1,19 +1,19 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Suspense } from 'react';
 import { useTranslations } from 'next-intl';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { ShieldCheck, ArrowRight, ArrowLeft, AlertCircle, RefreshCw } from 'lucide-react';
+import { ShieldCheck, ArrowLeft, AlertCircle, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const RESEND_COOLDOWN = 60; // seconds
 
-export default function VerifyOtpPage() {
+function VerifyOtpForm() {
   const t = useTranslations('auth.verifyOtp');
   const router = useRouter();
   const searchParams = useSearchParams();
-  const phone = searchParams.get('phone') || '';
+  const email = (searchParams.get('email') || '').trim().toLowerCase();
 
   const [digits, setDigits] = useState(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
@@ -23,12 +23,10 @@ export default function VerifyOtpPage() {
 
   const inputs = useRef([]);
 
-  // Redirect if no phone
   useEffect(() => {
-    if (!phone) router.replace('/forgot-password');
-  }, [phone, router]);
+    if (!email) router.replace('/forgot-password');
+  }, [email, router]);
 
-  // Resend cooldown ticker
   useEffect(() => {
     if (cooldown <= 0) return;
     const id = setInterval(() => setCooldown((c) => c - 1), 1000);
@@ -73,17 +71,17 @@ export default function VerifyOtpPage() {
       const res = await fetch('/api/auth/verify-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, code }),
+        body: JSON.stringify({ email, code }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'ኮድ ማረጋገጥ አልተሳካም');
 
       toast.success('ኮድ ተረጋግጧል');
       router.push(
-        `/reset-password?phone=${encodeURIComponent(phone)}&token=${encodeURIComponent(data.resetToken)}`
+        `/reset-password?email=${encodeURIComponent(email)}&token=${encodeURIComponent(data.resetToken || '')}`
       );
     } catch (err) {
-      setError(err.message || t('error') || 'ኮድ ማረጋገጥ አልተሳካም');
+      setError(err.message || 'ኮድ ማረጋገጥ አልተሳካም');
       setDigits(['', '', '', '', '', '']);
       inputs.current[0]?.focus();
     } finally {
@@ -92,13 +90,13 @@ export default function VerifyOtpPage() {
   };
 
   const handleResend = async () => {
-    if (cooldown > 0) return;
+    if (cooldown > 0 || !email) return;
     setResending(true);
     try {
       const res = await fetch('/api/auth/forgot-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone }),
+        body: JSON.stringify({ email }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'ኮድ መላክ አልተሳካም');
@@ -107,7 +105,7 @@ export default function VerifyOtpPage() {
       if (data.devOtp) {
         toast.success(`[DEV] OTP: ${data.devOtp}`, { duration: 15000 });
       } else {
-        toast.success('አዲስ ኮድ ተልኳል');
+        toast.success('አዲስ ኮድ ወደ ኢሜይልዎ ተልኳል');
       }
     } catch (err) {
       toast.error(err.message || 'ኮድ መላክ አልተሳካም');
@@ -118,9 +116,9 @@ export default function VerifyOtpPage() {
 
   return (
     <div className="max-w-md mx-auto">
-      <h1 className="text-2xl font-bold">ኮድ ያረጋግጡ</h1>
-      <p className="text-sm text-gray-500 mt-1">
-        6 አሃዝ ኮድ ወደ <span className="font-medium text-gray-700">{phone}</span> ተልኳል
+      <h1 className="text-2xl font-bold text-stone-900">ኮድ ያረጋግጡ</h1>
+      <p className="text-sm text-stone-500 mt-1">
+        6 አሃዝ ኮድ ወደ <span className="font-medium text-stone-800">{email}</span> ተልኳል
       </p>
 
       <form onSubmit={handleSubmit} className="mt-6 space-y-4">
@@ -136,7 +134,7 @@ export default function VerifyOtpPage() {
               onChange={(e) => handleChange(i, e.target.value)}
               onKeyDown={(e) => handleKeyDown(i, e)}
               onPaste={handlePaste}
-              className="w-12 h-14 text-center text-xl font-bold border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand disabled:opacity-50"
+              className="w-12 h-14 text-center text-xl font-bold border border-stone-300 rounded-lg bg-white text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-600 focus:border-amber-600 disabled:opacity-50"
               disabled={loading}
               autoFocus={i === 0}
             />
@@ -144,7 +142,7 @@ export default function VerifyOtpPage() {
         </div>
 
         {error && (
-          <div className="flex items-start gap-2 text-red-600 bg-red-50 rounded-lg p-3">
+          <div className="flex items-start gap-2 text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
             <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
             <p className="text-xs">{error}</p>
           </div>
@@ -153,7 +151,7 @@ export default function VerifyOtpPage() {
         <button
           type="submit"
           disabled={loading || code.length !== 6}
-          className="inline-flex items-center justify-center gap-2 w-full px-4 py-3 rounded-lg bg-brand text-white text-sm font-medium hover:bg-brand-dark transition disabled:opacity-50"
+          className="inline-flex items-center justify-center gap-2 w-full px-4 py-3 rounded-lg bg-amber-700 text-white text-sm font-semibold hover:bg-amber-800 transition disabled:opacity-50"
         >
           {loading ? 'በማረጋገጥ ላይ…' : 'አረጋግጥ'}
           {!loading && <ShieldCheck size={16} />}
@@ -165,20 +163,32 @@ export default function VerifyOtpPage() {
           type="button"
           onClick={handleResend}
           disabled={cooldown > 0 || resending}
-          className="inline-flex items-center gap-1.5 text-gray-600 hover:text-brand transition disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 text-stone-600 hover:text-amber-800 transition disabled:opacity-50"
         >
           <RefreshCw size={12} className={resending ? 'animate-spin' : ''} />
-          {resending ? 'በመላክ ላይ…' : cooldown > 0 ? `እንደገና ላክ (${cooldown}s)` : 'እንደገና ላክ'}
+          {resending
+            ? 'በመላክ ላይ…'
+            : cooldown > 0
+            ? `እንደገና ላክ (${cooldown}s)`
+            : 'እንደገና ላክ'}
         </button>
 
         <Link
           href="/forgot-password"
-          className="inline-flex items-center gap-1 text-gray-600 hover:text-brand transition"
+          className="inline-flex items-center gap-1 text-stone-600 hover:text-amber-800 transition"
         >
           <ArrowLeft size={12} />
-          ቁጥር ቀይር
+          ኢሜይል ቀይር
         </Link>
       </div>
     </div>
+  );
+}
+
+export default function VerifyOtpPage() {
+  return (
+    <Suspense fallback={null}>
+      <VerifyOtpForm />
+    </Suspense>
   );
 }

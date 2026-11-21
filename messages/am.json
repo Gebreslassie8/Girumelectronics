@@ -20,7 +20,7 @@
     "profile": "መገለጫ",
     "settings": "ቅንብሮች",
     "logout": "ውጣ",
-    "brand": "ግሩም ኤሌክትሮኒክስ",
+    "brand": "ግሩም ምጣድ",
     "warehouse": "መጋዘን",
     "finance": "ፋይናንስ",
     "soldItems": "የተሸጡ እቃዎች",
@@ -36,7 +36,9 @@
   "auth": {
     "login": {
       "title": "እንኳን ደህና መጡ",
-      "subtitle": "ወደ ግሩም ኤሌክትሮኒክስ ስርዓት ይግቡ",
+      "subtitle": "ወደ ግሩም ምጣድ ስርዓት ይግቡ",
+      "email": "ኢሜይል",
+      "emailPlaceholder": "you@example.com",
       "phone": "ስልክ ቁጥር",
       "phonePlaceholder": "0912345678",
       "password": "የይለፍ ቃል",
@@ -52,13 +54,13 @@
     },
     "register": {
       "title": "አዲስ መለያ ይፍጠሩ",
-      "subtitle": "የግሩም ኤሌክትሮኒክስ ስርዓት አባል ይሁኑ",
+      "subtitle": "የግሩም ምጣድ ስርዓት አባል ይሁኑ",
       "fullName": "ሙሉ ስም",
       "fullNamePlaceholder": "ሙሉ ስምዎ",
-      "phone": "ስልክ ቁጥር",
-      "phonePlaceholder": "0912345678",
-      "email": "ኢሜይል (አማራጭ)",
+      "email": "ኢሜይል",
       "emailPlaceholder": "you@example.com",
+      "phone": "ስልክ ቁጥር (አማራጭ)",
+      "phonePlaceholder": "0912345678",
       "password": "የይለፍ ቃል",
       "passwordPlaceholder": "ቢያንስ 6 ፊደሎች",
       "confirmPassword": "የይለፍ ቃል ያረጋግጡ",
@@ -75,13 +77,15 @@
     },
     "forgotPassword": {
       "title": "የይለፍ ቃል ረሱ?",
-      "subtitle": "ስልክ ቁጥርዎን ያስገቡ እና የማረጋገጫ ኮድ እንልክልዎታለን",
+      "subtitle": "የኢሜይል አድራሻዎን ያስገቡ እና የማረጋገጫ ኮድ እንልክልዎታለን",
+      "email": "ኢሜይል",
+      "emailPlaceholder": "you@example.com",
       "phone": "ስልክ ቁጥር",
       "phonePlaceholder": "0912345678",
       "submit": "ኮድ ላክ",
       "submitting": "በመላክ ላይ...",
       "backToLogin": "ወደ መግቢያ ተመለስ",
-      "success": "የማረጋገጫ ኮድ ተልኳል",
+      "success": "የማረጋገጫ ኮድ ወደ ኢሜይልዎ ተልኳል",
       "error": "ኮድ መላክ አልተሳካም",
       "noAccount": "መለያ የለዎትም?",
       "register": "ይመዝገቡ"
@@ -100,16 +104,18 @@
       "backToLogin": "ወደ መግቢያ ተመለስ",
       "success": "የይለፍ ቃል በተሳካ ሁኔታ ተቀይሯል",
       "error": "የይለፍ ቃል መቀየር አልተሳካም",
-      "passwordMismatch": "የይለፍ ቃሎች አይመሳሰሉም"
+      "passwordMismatch": "የይለፍ ቃሎች አይመሳሰሉም",
+      "passwordMin": "የይለፍ ቃል ቢያንስ 6 ፊደሎች መሆን አለበት"
     },
     "validation": {
+      "emailRequired": "ኢሜይል ያስፈልጋል",
+      "emailInvalid": "ትክክለኛ ኢሜይል ያስገቡ",
       "phoneRequired": "ስልክ ቁጥር ያስፈልጋል",
       "phoneInvalid": "ትክክለኛ የኢትዮጵያ ስልክ ቁጥር ያስገቡ",
       "passwordRequired": "የይለፍ ቃል ያስፈልጋል",
       "passwordMin": "የይለፍ ቃል ቢያንስ 6 ፊደሎች መሆን አለበት",
       "nameRequired": "ሙሉ ስም ያስፈልጋል",
       "nameMin": "ሙሉ ስም ቢያንስ 2 ፊደሎች መሆን አለበት",
-      "emailInvalid": "ትክክለኛ ኢሜይል ያስገቡ",
       "codeRequired": "የማረጋገጫ ኮድ ያስፈልጋል",
       "codeLength": "ኮድ 6 አሃዞች መሆን አለበት"
     }

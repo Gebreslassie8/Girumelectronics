@@ -1,5 +1,6 @@
 ﻿'use client';
 
+import { useState, useEffect } from 'react';
 import { useTranslations } from 'next-intl';
 import { Link } from '@/i18n/navigation';
 import { motion } from 'framer-motion';
@@ -13,8 +14,11 @@ import {
   CheckCircle2,
   Clock,
   Sparkles,
+  ShoppingCart,
+  Package,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import toast from 'react-hot-toast';
 
 const FEATURES = [
   { icon: Zap, key: 'electric' },
@@ -23,28 +27,15 @@ const FEATURES = [
   { icon: Truck, key: 'delivery' },
 ];
 
-const PRODUCTS = [
-  {
-    key: 'electricStove',
-    icon: Zap,
-    tagColor: 'bg-amber-700',
-    surface: 'from-amber-100/80 via-stone-100 to-amber-50/60',
-  },
-  {
-    key: 'firewoodStove',
-    icon: Flame,
-    tagColor: 'bg-stone-800',
-    surface: 'from-stone-200/80 via-amber-50/70 to-stone-100',
-  },
-  {
-    key: 'halfStove',
-    icon: Award,
-    tagColor: 'bg-emerald-700',
-    surface: 'from-amber-50 via-stone-100 to-emerald-50/60',
-  },
+const PRODUCT_SURFACES = [
+  { surface: 'from-amber-100/80 via-stone-100 to-amber-50/60', tagColor: 'bg-amber-700', icon: Zap },
+  { surface: 'from-stone-200/80 via-amber-50/70 to-stone-100', tagColor: 'bg-stone-800', icon: Flame },
+  { surface: 'from-amber-50 via-stone-100 to-emerald-50/60', tagColor: 'bg-emerald-700', icon: Award },
 ];
 
-const WHY_KEYS = ['local', 'warranty', 'freeDelivery', 'afterSales', 'affordable', 'expert'];
+const FALLBACK_PRODUCT_KEYS = ['electricStove', 'firewoodStove', 'halfStove'];
+
+const WHY_KEYS = ['local', 'warranty', 'quality', 'afterSales', 'affordable', 'expert'];
 
 const fadeUp = {
   hidden: { opacity: 0, y: 18 },
@@ -65,6 +56,49 @@ const stagger = {
 export default function HomePage() {
   const t = useTranslations('home');
 
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+
+    async function fetchProducts() {
+      try {
+        const res = await fetch('/api/products?public=true');
+        if (!active) return;
+
+        if (res.ok) {
+          const data = await res.json();
+          const list = Array.isArray(data) ? data : data.data || [];
+          setProducts(list);
+        }
+      } catch (error) {
+        console.error('Failed to load products', error);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    fetchProducts();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const fallbackProducts = FALLBACK_PRODUCT_KEYS.map((key) => ({
+    id: key,
+    name: t(`products.${key}.name`),
+    category: t(`products.${key}.tag`),
+    description: t(`products.${key}.desc`),
+    displayPrice: t(`products.${key}.price`),
+  }));
+
+  const displayProducts = products.length > 0 ? products.slice(0, 6) : fallbackProducts;
+
+  const handleBuyDirect = (product) => {
+    toast.success(`በቀጥታ ለመግዛት ተመርጧል: ${product.name}`);
+  };
+
   const stats = [
     { value: '5,000+', label: t('stats.customers') },
     { value: '10+', label: t('stats.years') },
@@ -78,11 +112,7 @@ export default function HomePage() {
       <section className="relative overflow-hidden bg-gradient-to-br from-stone-950 via-stone-900 to-amber-900 text-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 md:py-28 relative z-10">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
-            <motion.div
-              initial="hidden"
-              animate="visible"
-              variants={stagger}
-            >
+            <motion.div initial="hidden" animate="visible" variants={stagger}>
               <motion.span
                 variants={fadeUp}
                 className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-amber-500/15 border border-amber-400/30 text-amber-200 text-xs sm:text-sm font-medium mb-5"
@@ -209,7 +239,7 @@ export default function HomePage() {
         </motion.div>
       </section>
 
-      {/* FEATURED PRODUCTS */}
+      {/* FEATURED PRODUCTS - DYNAMIC FROM DB WITH TRANSLATED FALLBACK */}
       <section className="bg-stone-100/70 border-y border-stone-200/80 py-16">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <motion.div
@@ -223,68 +253,100 @@ export default function HomePage() {
             <p className="text-stone-600 mt-2 max-w-2xl mx-auto">{t('productsSubtitle')}</p>
           </motion.div>
 
-          <motion.div
-            initial="hidden"
-            whileInView="visible"
-            viewport={{ once: true, amount: 0.2 }}
-            variants={stagger}
-            className="grid grid-cols-1 md:grid-cols-3 gap-6"
-          >
-            {PRODUCTS.map((p) => {
-              const Icon = p.icon;
-              return (
-                <motion.div
-                  key={p.key}
-                  variants={fadeUp}
-                  whileHover={{ y: -4 }}
-                  transition={{ duration: 0.2 }}
-                  className="bg-white rounded-2xl overflow-hidden border border-stone-200/90 shadow-xs hover:shadow-md hover:border-amber-400/70 transition flex flex-col"
-                >
-                  <div
-                    className={cn(
-                      'h-48 bg-gradient-to-br flex items-center justify-center relative border-b border-stone-200/60',
-                      p.surface
-                    )}
+          {loading ? (
+            <div className="flex justify-center items-center h-40">
+              <div className="w-8 h-8 border-4 border-amber-600 border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : (
+            <motion.div
+              initial="hidden"
+              whileInView="visible"
+              viewport={{ once: true, amount: 0.2 }}
+              variants={stagger}
+              className="grid grid-cols-1 md:grid-cols-3 gap-6"
+            >
+              {displayProducts.map((p, index) => {
+                const styleIdx = index % PRODUCT_SURFACES.length;
+                const visual = PRODUCT_SURFACES[styleIdx];
+                const Icon = visual.icon;
+                const formattedPrice = p.sellingPrice
+                  ? `ብር ${Number(p.sellingPrice).toLocaleString()}`
+                  : p.displayPrice || 'ዋጋ አልተገኘም';
+
+                return (
+                  <motion.div
+                    key={p._id || p.id || index}
+                    variants={fadeUp}
+                    whileHover={{ y: -4 }}
+                    transition={{ duration: 0.2 }}
+                    className="bg-white rounded-2xl overflow-hidden border border-stone-200/90 shadow-xs hover:shadow-md hover:border-amber-400/70 transition flex flex-col"
                   >
-                    <div className="w-24 h-24 rounded-2xl bg-white/80 border border-stone-200/80 flex items-center justify-center shadow-xs">
-                      <Icon size={48} className="text-amber-800" />
-                    </div>
-                    <span
+                    <div
                       className={cn(
-                        'absolute top-3.5 right-3.5 px-3 py-1 rounded-full text-white text-xs font-semibold shadow-xs',
-                        p.tagColor
+                        'h-48 bg-gradient-to-br flex items-center justify-center relative border-b border-stone-200/60',
+                        visual.surface
                       )}
                     >
-                      {t(`products.${p.key}.tag`)}
-                    </span>
-                  </div>
-
-                  <div className="p-6 flex-1 flex flex-col justify-between">
-                    <div>
-                      <h3 className="font-bold text-lg text-stone-900 mb-1.5">
-                        {t(`products.${p.key}.name`)}
-                      </h3>
-                      <p className="text-sm text-stone-600 mb-5 leading-relaxed">
-                        {t(`products.${p.key}.desc`)}
-                      </p>
-                    </div>
-
-                    <div className="flex items-center justify-between pt-3 border-t border-stone-100">
-                      <span className="text-lg font-bold text-amber-800">
-                        {t(`products.${p.key}.price`)}
-                      </span>
-                      <Link
-                        href="/contact"
-                        className="inline-flex items-center gap-1 text-sm font-semibold text-amber-800 hover:text-amber-950 hover:underline"
+                      {p.image ? (
+                        <img src={p.image} alt={p.name} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-24 h-24 rounded-2xl bg-white/80 border border-stone-200/80 flex items-center justify-center shadow-xs">
+                          <Icon size={48} className="text-amber-800" />
+                        </div>
+                      )}
+                      <span
+                        className={cn(
+                          'absolute top-3.5 right-3.5 px-3 py-1 rounded-full text-white text-xs font-semibold shadow-xs',
+                          visual.tagColor
+                        )}
                       >
-                        {t('orderNow')} <ArrowRight size={15} />
-                      </Link>
+                        {p.category || 'አዲስ'}
+                      </span>
                     </div>
-                  </div>
-                </motion.div>
-              );
-            })}
-          </motion.div>
+
+                    <div className="p-6 flex-1 flex flex-col justify-between">
+                      <div>
+                        <h3 className="font-bold text-lg text-stone-900 mb-1.5">
+                          {p.name}
+                        </h3>
+                        <p className="text-sm text-stone-600 mb-5 leading-relaxed line-clamp-2">
+                          {p.description || 'ዘመናዊ እና ቀልጣፋ ምድጃ።'}
+                        </p>
+                      </div>
+
+                      <div className="pt-4 border-t border-stone-100 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-stone-500">ዋጋ</span>
+                          <span className="text-lg font-bold text-amber-800">
+                            {formattedPrice}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <Link
+                            href="/contact"
+                            className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-amber-600 text-amber-800 text-sm font-semibold hover:bg-amber-50 transition"
+                          >
+                            <Package size={16} />
+                            ይዘዙ
+                          </Link>
+
+                          <button
+                            type="button"
+                            onClick={() => handleBuyDirect(p)}
+                            className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-amber-600 text-white text-sm font-semibold hover:bg-amber-700 transition"
+                          >
+                            <ShoppingCart size={16} />
+                            ግዛ
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </motion.div>
+          )}
         </div>
       </section>
 
@@ -301,9 +363,9 @@ export default function HomePage() {
               {t('whyTitle')}
             </motion.h2>
             <ul className="space-y-3.5">
-              {WHY_KEYS.map((k, i) => (
+              {WHY_KEYS.map((k) => (
                 <motion.li
-                  key={i}
+                  key={k}
                   variants={fadeUp}
                   className="flex items-start gap-3 p-2.5 rounded-xl bg-white border border-stone-200/70"
                 >

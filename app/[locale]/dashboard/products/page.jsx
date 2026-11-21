@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/components/providers/AuthProvider';
 import {
-  Plus, Search, ShoppingCart, Package, TrendingUp, AlertTriangle,
+  Plus, Search, ShoppingCart, Package, TrendingUp,
   DollarSign, Building2, User, Calendar,
 } from 'lucide-react';
 import { formatETB, formatDate } from '@/lib/utils';
@@ -27,7 +27,6 @@ export default function ProductsPage() {
 
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('all');
   const [branchFilter, setBranchFilter] = useState('all');
   const [showModal, setShowModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
@@ -49,9 +48,15 @@ export default function ProductsPage() {
           setBranches(Array.isArray(brs) ? brs : []);
         }
       })
-      .catch((err) => { if (!cancelled) setError(err.message); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
+      .catch((err) => {
+        if (!cancelled) setError(err.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const userBranchId = useMemo(() => {
@@ -74,19 +79,19 @@ export default function ProductsPage() {
         (p.name || '').toLowerCase().includes(q) ||
         (p.code || '').toLowerCase().includes(q);
       const matchCategory = categoryFilter === 'all' || p.category === categoryFilter;
-      const matchStatus = statusFilter === 'all' || p.status === statusFilter;
-      const matchBranch = branchFilter === 'all' ||
-        (p.branch?._id || p.branch) === branchFilter;
-      return matchSearch && matchCategory && matchStatus && matchBranch;
+      const matchBranch =
+        branchFilter === 'all' || (p.branch?._id || p.branch) === branchFilter;
+      return matchSearch && matchCategory && matchBranch;
     });
-  }, [roleFiltered, search, categoryFilter, statusFilter, branchFilter]);
+  }, [roleFiltered, search, categoryFilter, branchFilter]);
 
   const stats = useMemo(() => {
     const total = roleFiltered.length;
-    const totalValue = roleFiltered.reduce((s, p) => s + (p.quantity || 0) * (p.sellingPrice || 0), 0);
-    const lowStock = roleFiltered.filter((p) => (p.quantity || 0) > 0 && (p.quantity || 0) < 10).length;
-    const outOfStock = roleFiltered.filter((p) => (p.quantity || 0) === 0).length;
-    return { total, totalValue, lowStock, outOfStock };
+    const totalValue = roleFiltered.reduce(
+      (s, p) => s + (p.quantity || 0) * (p.sellingPrice || 0),
+      0
+    );
+    return { total, totalValue };
   }, [roleFiltered]);
 
   const handleDeleteClick = (product) => setDeleteTarget(product);
@@ -113,7 +118,9 @@ export default function ProductsPage() {
           method: 'PATCH',
           body: JSON.stringify(data),
         });
-        setProducts((prev) => prev.map((p) => (p._id === editingProduct._id ? updated : p)));
+        setProducts((prev) =>
+          prev.map((p) => (p._id === editingProduct._id ? updated : p))
+        );
         toast.success('ምርት ተስተካክሏል');
       } else {
         const created = await apiFetch('/products', {
@@ -132,8 +139,8 @@ export default function ProductsPage() {
 
   if (loading) {
     return (
-      <div className="p-8 text-center text-gray-500">
-        <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+      <div className="p-8 text-center text-stone-500">
+        <div className="w-10 h-10 border-4 border-amber-700 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
         <p className="text-sm">በመጫን ላይ...</p>
       </div>
     );
@@ -143,7 +150,7 @@ export default function ProductsPage() {
     return (
       <div className="p-8 text-center">
         <p className="text-red-600 font-medium">ስህተት ተፈጥሯል</p>
-        <p className="text-sm text-gray-500 mt-1">{error}</p>
+        <p className="text-sm text-stone-500 mt-1">{error}</p>
       </div>
     );
   }
@@ -152,75 +159,93 @@ export default function ProductsPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">ምርቶች</h1>
-          <p className="text-sm text-gray-500 mt-1">
+          <h1 className="text-2xl font-bold text-stone-900">ምርቶች</h1>
+          <p className="text-sm text-stone-500 mt-1">
             {filtered.length} ምርቶች · {formatETB(stats.totalValue)} ጠቅላላ ዋጋ
           </p>
           {user?.role === 'seller' && userBranchId && (
-            <p className="text-xs text-brand font-medium mt-1 flex items-center gap-1">
+            <p className="text-xs text-amber-800 font-medium mt-1 flex items-center gap-1">
               <Building2 size={12} />
               {typeof user.branch === 'object' ? user.branch.name : 'ቅርንጫፍ'}
             </p>
           )}
         </div>
         {canManage && (
-          <Button onClick={() => { setEditingProduct(null); setShowModal(true); }}>
+          <Button
+            onClick={() => {
+              setEditingProduct(null);
+              setShowModal(true);
+            }}
+          >
             <Plus size={18} /> አዲስ ምርት
           </Button>
         )}
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard label="ጠቅላላ ምርቶች" value={stats.total} icon={ShoppingCart} color="bg-blue-500" />
-        <StatCard label="ጠቅላላ ዋጋ" value={formatETB(stats.totalValue)} icon={DollarSign} color="bg-green-500" />
-        <StatCard label="ዝቅተኛ ክምችት" value={stats.lowStock} icon={AlertTriangle} color="bg-yellow-500" />
-        <StatCard label="ከክምችት ውጪ" value={stats.outOfStock} icon={Package} color="bg-red-500" />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <StatCard
+          label="ጠቅላላ ምርቶች"
+          value={stats.total}
+          icon={ShoppingCart}
+          color="bg-amber-700"
+        />
+        <StatCard
+          label="ጠቅላላ ዋጋ"
+          value={formatETB(stats.totalValue)}
+          icon={DollarSign}
+          color="bg-emerald-700"
+        />
       </div>
 
       <Card padding="sm">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div className="relative">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <Search
+              size={16}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400"
+            />
             <input
               type="text"
               placeholder="ፈልግ (ስም ወይም ኮድ)..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800"
+              className="w-full pl-9 pr-3 py-2 border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-600 text-sm text-stone-800"
             />
           </div>
           <select
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value)}
-            className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm bg-white text-gray-800"
+            className="px-3 py-2 border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-600 text-sm bg-white text-stone-800"
           >
             <option value="all">ሁሉም ምድቦች</option>
-            {PRODUCT_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm bg-white text-gray-800"
-          >
-            <option value="all">ሁሉም ሁኔታዎች</option>
-            {Object.entries(PRODUCT_STATUS).map(([k, v]) => (
-              <option key={k} value={k}>{v.label || v}</option>
+            {PRODUCT_CATEGORIES.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
             ))}
           </select>
           {user?.role === 'admin' ? (
             <select
               value={branchFilter}
               onChange={(e) => setBranchFilter(e.target.value)}
-              className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm bg-white text-gray-800"
+              className="px-3 py-2 border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-600 text-sm bg-white text-stone-800"
             >
               <option value="all">ሁሉም ቅርንጫፎች</option>
-              {branches.map((b) => <option key={b._id} value={b._id}>{b.name}</option>)}
+              {branches.map((b) => (
+                <option key={b._id} value={b._id}>
+                  {b.name}
+                </option>
+              ))}
             </select>
           ) : (
-            <div className="px-3 py-2 rounded-lg bg-blue-50 text-blue-700 text-sm flex items-center gap-2">
+            <div className="px-3 py-2 rounded-lg bg-amber-50 text-amber-900 border border-amber-200/70 text-sm flex items-center gap-2">
               <Building2 size={14} />
               <span className="font-medium truncate">
-                {user?.branch ? (typeof user.branch === 'object' ? user.branch.name : 'ቅርንጫፍ') : 'ቅርንጫፍ'}
+                {user?.branch
+                  ? typeof user.branch === 'object'
+                    ? user.branch.name
+                    : 'ቅርንጫፍ'
+                  : 'ቅርንጫፍ'}
               </span>
             </div>
           )}
@@ -230,67 +255,78 @@ export default function ProductsPage() {
       <Card padding="none">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-200">
+            <thead className="bg-stone-100/80 border-b border-stone-200">
               <tr>
-                <th className="px-4 py-3 text-left font-semibold text-gray-700">ኮድ</th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-700">ስም</th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-700">ምድብ</th>
-                <th className="px-4 py-3 text-right font-semibold text-gray-700">ብዛት</th>
-                <th className="px-4 py-3 text-right font-semibold text-gray-700">የመግዣ</th>
-                <th className="px-4 py-3 text-right font-semibold text-gray-700">የመሸጫ</th>
-                <th className="px-4 py-3 text-right font-semibold text-gray-700">ትርፍ</th>
-                <th className="px-4 py-3 text-center font-semibold text-gray-700">ሁኔታ</th>
-                <th className="px-4 py-3 text-center font-semibold text-gray-700">ተግባር</th>
+                <th className="px-4 py-3 text-left font-semibold text-stone-700">ኮድ</th>
+                <th className="px-4 py-3 text-left font-semibold text-stone-700">የእቃ አይነት</th>
+                <th className="px-4 py-3 text-right font-semibold text-stone-700">ብዛት</th>
+                <th className="px-4 py-3 text-right font-semibold text-stone-700">የመግዣ</th>
+                <th className="px-4 py-3 text-right font-semibold text-stone-700">የመሸጫ</th>
+                <th className="px-4 py-3 text-right font-semibold text-stone-700">ትርፍ</th>
+                <th className="px-4 py-3 text-center font-semibold text-stone-700">ተግባር</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="text-center py-12">
+                  <td colSpan={7} className="text-center py-12">
                     <div className="flex flex-col items-center gap-2">
-                      <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center">
-                        <ShoppingCart size={28} className="text-gray-400" />
+                      <div className="w-16 h-16 rounded-full bg-stone-100 flex items-center justify-center">
+                        <ShoppingCart size={28} className="text-stone-400" />
                       </div>
-                      <p className="text-gray-500 text-sm">ምንም ምርት አልተገኘም</p>
+                      <p className="text-stone-500 text-sm">ምንም ምርት አልተገኘም</p>
                     </div>
                   </td>
                 </tr>
               ) : (
                 filtered.map((product) => {
-                  const status = PRODUCT_STATUS[product.status] || { label: product.status, color: 'gray' };
                   const profit = (product.sellingPrice || 0) - (product.unitPrice || 0);
                   return (
-                    <tr key={product._id} className="border-b border-gray-100 hover:bg-gray-50">
-                      <td className="px-4 py-3 font-mono text-xs text-brand font-medium">{product.code}</td>
-                      <td className="px-4 py-3">
-                        <p className="font-medium text-gray-800">{product.name}</p>
-                        <p className="text-xs text-gray-500 truncate max-w-xs">{product.description}</p>
+                    <tr
+                      key={product._id}
+                      className="border-b border-stone-100 hover:bg-amber-50/30"
+                    >
+                      <td className="px-4 py-3 font-mono text-xs text-amber-800 font-semibold">
+                        {product.code}
                       </td>
                       <td className="px-4 py-3">
-                        <span className="inline-flex px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 text-xs">
-                          {product.category}
-                        </span>
+                        <p className="font-medium text-stone-900">{product.name}</p>
+                        <p className="text-xs text-stone-500 truncate max-w-xs">
+                          {product.description}
+                        </p>
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <span className={'font-semibold ' + (
-                          product.quantity === 0 ? 'text-red-600' :
-                          product.quantity < 10 ? 'text-yellow-600' : 'text-gray-800'
-                        )}>
+                        <span
+                          className={
+                            'font-semibold ' +
+                            (product.quantity === 0
+                              ? 'text-red-600'
+                              : product.quantity < 10
+                              ? 'text-amber-700'
+                              : 'text-stone-800')
+                          }
+                        >
                           {product.quantity} {product.unit}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-right text-gray-700">{formatETB(product.unitPrice || 0)}</td>
-                      <td className="px-4 py-3 text-right font-semibold text-gray-800">{formatETB(product.sellingPrice || 0)}</td>
-                      <td className="px-4 py-3 text-right">
-                        <span className="text-green-600 font-semibold">+{formatETB(profit)}</span>
+                      <td className="px-4 py-3 text-right text-stone-700">
+                        {formatETB(product.unitPrice || 0)}
                       </td>
-                      <td className="px-4 py-3 text-center">
-                        <Badge color={status.color}>{status.label}</Badge>
+                      <td className="px-4 py-3 text-right font-semibold text-stone-900">
+                        {formatETB(product.sellingPrice || 0)}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <span className="text-emerald-700 font-semibold">
+                          +{formatETB(profit)}
+                        </span>
                       </td>
                       <td className="px-4 py-3">
                         <ActionButtons
                           onView={() => setViewProduct(product)}
-                          onEdit={() => { setEditingProduct(product); setShowModal(true); }}
+                          onEdit={() => {
+                            setEditingProduct(product);
+                            setShowModal(true);
+                          }}
                           onDelete={() => handleDeleteClick(product)}
                           canEdit={canManage}
                           canDelete={canManage}
@@ -307,7 +343,10 @@ export default function ProductsPage() {
 
       <Modal
         isOpen={showModal}
-        onClose={() => { setShowModal(false); setEditingProduct(null); }}
+        onClose={() => {
+          setShowModal(false);
+          setEditingProduct(null);
+        }}
         title={editingProduct ? 'ምርት አስተካክል' : 'አዲስ ምርት'}
         size="md"
       >
@@ -315,7 +354,10 @@ export default function ProductsPage() {
           product={editingProduct}
           branches={branches}
           onSave={handleSave}
-          onCancel={() => { setShowModal(false); setEditingProduct(null); }}
+          onCancel={() => {
+            setShowModal(false);
+            setEditingProduct(null);
+          }}
           currentUser={user}
         />
       </Modal>
@@ -350,8 +392,8 @@ function StatCard({ label, value, icon: Icon, color }) {
     <Card padding="sm">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-xs text-gray-500">{label}</p>
-          <p className="text-xl font-bold text-gray-800 mt-1">{value}</p>
+          <p className="text-xs text-stone-500">{label}</p>
+          <p className="text-xl font-bold text-stone-900 mt-1">{value}</p>
         </div>
         <div className={'p-2.5 rounded-lg ' + color}>
           <Icon size={20} className="text-white" />
@@ -364,18 +406,21 @@ function StatCard({ label, value, icon: Icon, color }) {
 function ProductForm({ product, branches, onSave, onCancel, currentUser }) {
   const isSeller = currentUser?.role === 'seller';
 
-  const defaultBranch = isSeller && currentUser?.branch
-    ? (typeof currentUser.branch === 'object' ? currentUser.branch._id : currentUser.branch)
-    : (product?.branch?._id || product?.branch || '');
+  const defaultBranch =
+    isSeller && currentUser?.branch
+      ? typeof currentUser.branch === 'object'
+        ? currentUser.branch._id
+        : currentUser.branch
+      : product?.branch?._id || product?.branch || '';
 
   const [form, setForm] = useState({
-    name: product?.name || '',
+    name: product?.name || 'ግሩም ኤሌክትሪክ ምጣድ',
     category: product?.category || 'ምጣድ',
     description: product?.description || '',
-    quantity: product?.quantity || 0,
+    quantity: product?.quantity ?? 0,
     unit: product?.unit || 'pcs',
-    unitPrice: product?.unitPrice || 0,
-    sellingPrice: product?.sellingPrice || 0,
+    unitPrice: product?.unitPrice ?? 3600,
+    sellingPrice: product?.sellingPrice ?? 4500,
     status: product?.status || 'in_stock',
     branch: defaultBranch,
   });
@@ -384,7 +429,9 @@ function ProductForm({ product, branches, onSave, onCancel, currentUser }) {
     const { name, value } = e.target;
     setForm({
       ...form,
-      [name]: ['quantity', 'unitPrice', 'sellingPrice'].includes(name) ? Number(value) : value,
+      [name]: ['quantity', 'unitPrice', 'sellingPrice'].includes(name)
+        ? Number(value)
+        : value,
     });
   };
 
@@ -411,103 +458,141 @@ function ProductForm({ product, branches, onSave, onCancel, currentUser }) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <FormField label="ስም *">
-        <input name="name" value={form.name} onChange={onChange} required
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
+      <FormField label="የእቃ አይነት *">
+        <input
+          name="name"
+          value={form.name}
+          onChange={onChange}
+          required
+          className="w-full px-3 py-2 border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-600 text-sm text-stone-800 bg-white"
         />
       </FormField>
 
-      <div className="grid grid-cols-2 gap-3">
-        <FormField label="ምድብ">
-          <select name="category" value={form.category} onChange={onChange}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800">
-            {PRODUCT_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
-        </FormField>
-        <FormField label="ሁኔታ">
-          <select name="status" value={form.status} onChange={onChange}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800">
-            {Object.entries(PRODUCT_STATUS).map(([k, v]) => (
-              <option key={k} value={k}>{v.label || v}</option>
-            ))}
-          </select>
-        </FormField>
-      </div>
-
       <FormField label="መግለጫ">
-        <textarea name="description" value={form.description} onChange={onChange} rows={2}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm resize-none text-gray-800 bg-white"
+        <textarea
+          name="description"
+          value={form.description}
+          onChange={onChange}
+          rows={2}
+          className="w-full px-3 py-2 border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-600 text-sm resize-none text-stone-800 bg-white"
         />
       </FormField>
 
       <div className="grid grid-cols-2 gap-3">
         <FormField label="ብዛት *">
-          <input type="number" name="quantity" value={form.quantity} onChange={onChange} required min={0}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
+          <input
+            type="number"
+            name="quantity"
+            value={form.quantity}
+            onChange={onChange}
+            required
+            min={0}
+            className="w-full px-3 py-2 border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-600 text-sm text-stone-800 bg-white"
           />
         </FormField>
         <FormField label="መለኪያ">
-          <input name="unit" value={form.unit} onChange={onChange}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
+          <input
+            name="unit"
+            value={form.unit}
+            onChange={onChange}
+            className="w-full px-3 py-2 border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-600 text-sm text-stone-800 bg-white"
           />
         </FormField>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
         <FormField label="የመግዣ ዋጋ *">
-          <input type="number" name="unitPrice" value={form.unitPrice} onChange={onChange} required min={0}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
+          <input
+            type="number"
+            name="unitPrice"
+            value={form.unitPrice}
+            onChange={onChange}
+            required
+            min={0}
+            className="w-full px-3 py-2 border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-600 text-sm text-stone-800 bg-white"
           />
         </FormField>
         <FormField label="የመሸጫ ዋጋ *">
-          <input type="number" name="sellingPrice" value={form.sellingPrice} onChange={onChange} required min={0}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
+          <input
+            type="number"
+            name="sellingPrice"
+            value={form.sellingPrice}
+            onChange={onChange}
+            required
+            min={0}
+            className="w-full px-3 py-2 border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-600 text-sm text-stone-800 bg-white"
           />
         </FormField>
       </div>
 
       <FormField label="ቅርንጫፍ *">
         {isSeller ? (
-          <div className="w-full px-3 py-2 rounded-lg bg-blue-50 text-blue-700 text-sm font-medium">
-            {typeof currentUser.branch === 'object' ? currentUser.branch?.name : 'ቅርንጫፍ'}
+          <div className="w-full px-3 py-2 rounded-lg bg-amber-50 text-amber-900 text-sm font-medium">
+            {typeof currentUser.branch === 'object'
+              ? currentUser.branch?.name
+              : 'ቅርንጫፍ'}
           </div>
         ) : (
-          <select name="branch" value={form.branch} onChange={onChange}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800">
+          <select
+            name="branch"
+            value={form.branch}
+            onChange={onChange}
+            className="w-full px-3 py-2 border border-stone-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-600 text-sm text-stone-800"
+          >
             <option value="">— ይምረጡ —</option>
             {branches.length === 0 ? (
-              <option value="" disabled>ቅርንጫፍ በመጫን ላይ...</option>
+              <option value="" disabled>
+                ቅርንጫፍ በመጫን ላይ...
+              </option>
             ) : (
-              branches.map((b) => <option key={b._id} value={b._id}>{b.name}</option>)
+              branches.map((b) => (
+                <option key={b._id} value={b._id}>
+                  {b.name}
+                </option>
+              ))
             )}
           </select>
         )}
       </FormField>
 
-      <div className={'rounded-lg p-3 text-sm ' + (profit < 0 ? 'bg-red-50' : 'bg-green-50')}>
+      <div
+        className={
+          'rounded-lg p-3 text-sm ' + (profit < 0 ? 'bg-red-50' : 'bg-emerald-50')
+        }
+      >
         <div className="flex justify-between">
-          <span className="text-gray-600">ትርፍ: </span>
-          <span className={'font-bold ' + (profit < 0 ? 'text-red-600' : 'text-green-600')}>
-            {profit < 0 ? '-' : '+'}{formatETB(Math.abs(profit))}
+          <span className="text-stone-600">ትርፍ: </span>
+          <span
+            className={
+              'font-bold ' + (profit < 0 ? 'text-red-600' : 'text-emerald-700')
+            }
+          >
+            {profit < 0 ? '-' : '+'}
+            {formatETB(Math.abs(profit))}
           </span>
         </div>
         {form.unitPrice > 0 && (
           <div className="flex justify-between mt-1 text-xs">
-            <span className="text-gray-500">ትርፍ መጠን:</span>
-            <span className={profit < 0 ? 'text-red-600' : 'text-green-600'}>
+            <span className="text-stone-500">ትርፍ መጠን:</span>
+            <span className={profit < 0 ? 'text-red-600' : 'text-emerald-700'}>
               {((profit / form.unitPrice) * 100).toFixed(1)}%
             </span>
           </div>
         )}
       </div>
 
-      <div className="flex gap-2 pt-2 border-t border-gray-200">
-        <button type="button" onClick={onCancel}
-          className="flex-1 px-4 py-2.5 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 transition">
+      <div className="flex gap-2 pt-2 border-t border-stone-200">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="flex-1 px-4 py-2.5 rounded-lg border border-stone-300 text-stone-700 font-medium hover:bg-stone-50 transition"
+        >
           ሰርዝ
         </button>
-        <button type="submit"
-          className="flex-1 px-4 py-2.5 rounded-lg bg-brand text-white font-semibold hover:bg-brand-dark transition">
+        <button
+          type="submit"
+          className="flex-1 px-4 py-2.5 rounded-lg bg-amber-700 text-white font-semibold hover:bg-amber-800 transition"
+        >
           {product ? 'አስተካክል' : 'ጨምር'}
         </button>
       </div>
@@ -518,47 +603,71 @@ function ProductForm({ product, branches, onSave, onCancel, currentUser }) {
 function FormField({ label, children }) {
   return (
     <div>
-      <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+      <label className="block text-xs font-medium text-stone-600 mb-1">{label}</label>
       {children}
     </div>
   );
 }
 
 function ProductView({ product }) {
-  const status = PRODUCT_STATUS[product.status] || { label: product.status, color: 'gray' };
+  const status = PRODUCT_STATUS[product.status] || {
+    label: product.status,
+    color: 'gray',
+  };
   const profit = (product.sellingPrice || 0) - (product.unitPrice || 0);
-  const profitMargin = (product.unitPrice || 0) > 0
-    ? ((profit / product.unitPrice) * 100).toFixed(1)
-    : 0;
+  const profitMargin =
+    (product.unitPrice || 0) > 0
+      ? ((profit / product.unitPrice) * 100).toFixed(1)
+      : 0;
 
   return (
     <div>
-      <div className="flex items-center gap-3 pb-4 border-b border-gray-100">
-        <div className="w-14 h-14 rounded-xl bg-brand/10 flex items-center justify-center">
-          <ShoppingCart size={28} className="text-brand" />
+      <div className="flex items-center gap-3 pb-4 border-b border-stone-100">
+        <div className="w-14 h-14 rounded-xl bg-amber-100/80 flex items-center justify-center">
+          <ShoppingCart size={28} className="text-amber-800" />
         </div>
         <div>
-          <p className="font-bold text-gray-800 text-lg">{product.name}</p>
-          <p className="text-sm text-gray-500 font-mono">{product.code}</p>
+          <p className="font-bold text-stone-900 text-lg">{product.name}</p>
+          <p className="text-sm text-stone-500 font-mono">{product.code}</p>
         </div>
       </div>
 
       <div className="grid grid-cols-3 gap-2 py-4">
-        <StatBox label="ብዛት" value={(product.quantity || 0) + ' ' + (product.unit || 'pcs')} icon={Package} color="text-purple-600 bg-purple-50" />
-        <StatBox label="የመሸጫ" value={formatETB(product.sellingPrice || 0)} icon={DollarSign} color="text-blue-600 bg-blue-50" />
-        <StatBox label="ትርፍ" value={formatETB(profit)} icon={TrendingUp} color="text-green-600 bg-green-50" />
+        <StatBox
+          label="ብዛት"
+          value={(product.quantity || 0) + ' ' + (product.unit || 'pcs')}
+          icon={Package}
+          color="text-amber-800 bg-amber-50"
+        />
+        <StatBox
+          label="የመሸጫ"
+          value={formatETB(product.sellingPrice || 0)}
+          icon={DollarSign}
+          color="text-stone-800 bg-stone-100"
+        />
+        <StatBox
+          label="ትርፍ"
+          value={formatETB(profit)}
+          icon={TrendingUp}
+          color="text-emerald-700 bg-emerald-50"
+        />
       </div>
 
-      <div className="space-y-3 pt-3 border-t border-gray-100 text-sm">
+      <div className="space-y-3 pt-3 border-t border-stone-100 text-sm">
         <Row label="ምድብ" value={product.category} />
         <Row label="መግለጫ" value={product.description || '-'} />
         <Row label="የመግዣ ዋጋ" value={formatETB(product.unitPrice || 0)} />
-        <Row label="ትርፍ መጠን" value={profitMargin + '%'} bold color={profit < 0 ? 'text-red-600' : 'text-green-600'} />
+        <Row
+          label="ትርፍ መጠን"
+          value={profitMargin + '%'}
+          bold
+          color={profit < 0 ? 'text-red-600' : 'text-emerald-700'}
+        />
         <Row label="ቅርንጫፍ" value={product.branch?.name || '-'} icon={Building2} />
         <Row label="የተፈጠረ" value={formatDate(product.createdAt)} icon={Calendar} />
         <Row label="የፈጠረ" value={product.createdBy?.fullName || '-'} icon={User} />
         <div className="flex justify-between items-center">
-          <span className="text-gray-500">ሁኔታ:</span>
+          <span className="text-stone-500">ሁኔታ:</span>
           <Badge color={status.color}>{status.label}</Badge>
         </div>
       </div>
@@ -573,8 +682,8 @@ function StatBox({ label, value, icon: Icon, color }) {
       <div className="flex items-center justify-center mb-1">
         <Icon size={16} className={parts[0]} />
       </div>
-      <p className="text-xs font-bold text-gray-800">{value}</p>
-      <p className="text-[10px] text-gray-500">{label}</p>
+      <p className="text-xs font-bold text-stone-900">{value}</p>
+      <p className="text-[10px] text-stone-500">{label}</p>
     </div>
   );
 }
@@ -582,10 +691,16 @@ function StatBox({ label, value, icon: Icon, color }) {
 function Row({ label, value, icon: Icon, bold, color }) {
   return (
     <div className="flex justify-between gap-3">
-      <span className="text-gray-500 flex-shrink-0 flex items-center gap-1">
+      <span className="text-stone-500 flex-shrink-0 flex items-center gap-1">
         {Icon && <Icon size={12} />} {label}:
       </span>
-      <span className={'text-right ' + (bold ? 'font-semibold ' : '') + (color || 'text-gray-800')}>{value}</span>
+      <span
+        className={
+          'text-right ' + (bold ? 'font-semibold ' : '') + (color || 'text-stone-800')
+        }
+      >
+        {value}
+      </span>
     </div>
   );
 }

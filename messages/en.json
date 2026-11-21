@@ -24,7 +24,7 @@
     "warehouse": "Warehouse",
     "finance": "Finance",
     "soldItems": "Sold Items",
-    "warranty": "Warranty",  
+    "warranty": "Warranty",
     "more": "More"
   },
   "sidebar": {
@@ -172,14 +172,14 @@
     "whyTitle": "Why Choose Us?",
     "whyItems": {
       "local": "Locally manufactured — quality guaranteed",
-      "warranty": "2-year warranty",
-      "freeDelivery": "Free home delivery and installation",
+      "warranty": "1-year warranty",
+      "quality": "Verified product quality and durability",
       "afterSales": "After-sales maintenance service",
       "affordable": "Affordable price and easy payment",
       "expert": "Expert advice and support"
     },
     "ctaTitle": "Order Today!",
-    "ctaDesc": "Special discount and free delivery for the first 50 customers.",
+    "ctaDesc": "Special discount for the first 50 customers and reliable service.",
     "ctaButton": "Contact Us Now",
     "finalTitle": "Ready?",
     "finalDesc": "Contact us today and learn more about our products.",

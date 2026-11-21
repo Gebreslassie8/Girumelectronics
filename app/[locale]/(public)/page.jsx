@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useTranslations } from 'next-intl';
 import { Link } from '@/i18n/navigation';
 import { motion } from 'framer-motion';
@@ -16,6 +16,10 @@ import {
   Sparkles,
   ShoppingCart,
   Package,
+  Plus,
+  Minus,
+  Trash2,
+  X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import toast from 'react-hot-toast';
@@ -37,6 +41,8 @@ const FALLBACK_PRODUCT_KEYS = ['electricStove', 'firewoodStove', 'halfStove'];
 
 const WHY_KEYS = ['local', 'warranty', 'quality', 'afterSales', 'affordable', 'expert'];
 
+const CART_STORAGE_KEY = 'grum_stove_cart_v1';
+
 const fadeUp = {
   hidden: { opacity: 0, y: 18 },
   visible: {
@@ -53,11 +59,45 @@ const stagger = {
   },
 };
 
+function parsePriceValue(product) {
+  if (typeof product.sellingPrice === 'number' && !Number.isNaN(product.sellingPrice)) {
+    return product.sellingPrice;
+  }
+  if (product.displayPrice) {
+    const digits = String(product.displayPrice).replace(/[^0-9.]/g, '');
+    const parsed = Number(digits);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+  return 0;
+}
+
 export default function HomePage() {
   const t = useTranslations('home');
 
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [cart, setCart] = useState([]);
+  const [cartOpen, setCartOpen] = useState(false);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(CART_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) setCart(parsed);
+      }
+    } catch (err) {
+      console.error('Failed to read cart from storage', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(cart));
+    } catch (err) {
+      console.error('Failed to save cart to storage', err);
+    }
+  }, [cart]);
 
   useEffect(() => {
     let active = true;
@@ -95,9 +135,57 @@ export default function HomePage() {
 
   const displayProducts = products.length > 0 ? products.slice(0, 6) : fallbackProducts;
 
-  const handleBuyDirect = (product) => {
-    toast.success(`በቀጥታ ለመግዛት ተመርጧል: ${product.name}`);
+  const handleAddToCart = (product, index) => {
+    const itemId = String(product._id || product.id || `${product.name}-${index}`);
+    const unitPrice = parsePriceValue(product);
+
+    setCart((prev) => {
+      const existingIndex = prev.findIndex((item) => item.id === itemId);
+      if (existingIndex > -1) {
+        const next = [...prev];
+        next[existingIndex] = {
+          ...next[existingIndex],
+          qty: next[existingIndex].qty + 1,
+        };
+        return next;
+      }
+      return [
+        ...prev,
+        {
+          id: itemId,
+          name: product.name,
+          category: product.category || 'አዲስ',
+          price: unitPrice,
+          qty: 1,
+        },
+      ];
+    });
+
+    toast.success(`ወደ ጋሪ ተጨምሯል: ${product.name}`);
   };
+
+  const updateCartQty = (id, delta) => {
+    setCart((prev) =>
+      prev
+        .map((item) => (item.id === id ? { ...item, qty: item.qty + delta } : item))
+        .filter((item) => item.qty > 0)
+    );
+  };
+
+  const removeFromCart = (id) => {
+    setCart((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const clearCart = () => {
+    setCart([]);
+    toast.success('ጋሪ ተጸድቷል');
+  };
+
+  const cartSummary = useMemo(() => {
+    const totalItems = cart.reduce((sum, item) => sum + item.qty, 0);
+    const totalAmount = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
+    return { totalItems, totalAmount };
+  }, [cart]);
 
   const stats = [
     { value: '5,000+', label: t('stats.customers') },
@@ -107,7 +195,7 @@ export default function HomePage() {
   ];
 
   return (
-    <div className="bg-stone-50/40 min-h-screen">
+    <div className="bg-stone-50/40 min-h-screen relative">
       {/* HERO SECTION */}
       <section className="relative overflow-hidden bg-gradient-to-br from-stone-950 via-stone-900 to-amber-900 text-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 md:py-28 relative z-10">
@@ -333,7 +421,7 @@ export default function HomePage() {
 
                           <button
                             type="button"
-                            onClick={() => handleBuyDirect(p)}
+                            onClick={() => handleAddToCart(p, index)}
                             className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-amber-600 text-white text-sm font-semibold hover:bg-amber-700 transition"
                           >
                             <ShoppingCart size={16} />
@@ -430,6 +518,121 @@ export default function HomePage() {
           </motion.div>
         </motion.div>
       </section>
+
+      {/* FLOATING CART BUTTON (SHOWN WHEN CART HAS ITEMS) */}
+      {cartSummary.totalItems > 0 && (
+        <button
+          type="button"
+          onClick={() => setCartOpen(true)}
+          className="fixed bottom-6 right-6 z-40 inline-flex items-center gap-2.5 px-5 py-3.5 rounded-full bg-stone-900 text-white border border-amber-400/40 shadow-lg hover:bg-stone-800 transition"
+        >
+          <ShoppingCart size={18} className="text-amber-300" />
+          <span className="text-sm font-semibold">ጋሪ ({cartSummary.totalItems})</span>
+          <span className="text-xs px-2 py-0.5 rounded-full bg-amber-600 text-white font-bold">
+            ብር {cartSummary.totalAmount.toLocaleString()}
+          </span>
+        </button>
+      )}
+
+      {/* CART DRAWER */}
+      {cartOpen && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-stone-950/50 backdrop-blur-[1px]">
+          <div className="w-full max-w-md bg-white h-full shadow-2xl flex flex-col justify-between border-l border-stone-200">
+            <div className="p-5 border-b border-stone-200 flex items-center justify-between bg-stone-50">
+              <div className="flex items-center gap-2">
+                <ShoppingCart size={20} className="text-amber-800" />
+                <h3 className="font-bold text-stone-900 text-lg">
+                  የግዢ ጋሪ ({cartSummary.totalItems})
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCartOpen(false)}
+                className="p-1.5 rounded-lg text-stone-500 hover:bg-stone-200/70 transition"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5 space-y-3">
+              {cart.length === 0 ? (
+                <p className="text-center text-stone-500 py-12 text-sm">
+                  ጋሪው ባዶ ነው
+                </p>
+              ) : (
+                cart.map((item) => (
+                  <div
+                    key={item.id}
+                    className="p-3.5 rounded-xl border border-stone-200 bg-stone-50/60 flex items-center justify-between gap-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-semibold text-stone-900 text-sm truncate">
+                        {item.name}
+                      </p>
+                      <p className="text-xs text-amber-800 font-semibold mt-0.5">
+                        ብር {(item.price * item.qty).toLocaleString()}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => updateCartQty(item.id, -1)}
+                        className="w-7 h-7 rounded-lg border border-stone-300 bg-white flex items-center justify-center text-stone-700 hover:bg-stone-100"
+                      >
+                        <Minus size={14} />
+                      </button>
+                      <span className="w-6 text-center text-sm font-bold text-stone-900">
+                        {item.qty}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => updateCartQty(item.id, 1)}
+                        className="w-7 h-7 rounded-lg border border-stone-300 bg-white flex items-center justify-center text-stone-700 hover:bg-stone-100"
+                      >
+                        <Plus size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeFromCart(item.id)}
+                        className="w-7 h-7 rounded-lg text-red-600 hover:bg-red-50 flex items-center justify-center ml-1"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="p-5 border-t border-stone-200 bg-stone-50 space-y-3">
+              <div className="flex items-center justify-between text-base font-bold text-stone-900">
+                <span>ጠቅላላ ድምር:</span>
+                <span className="text-amber-800">
+                  ብር {cartSummary.totalAmount.toLocaleString()}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={clearCart}
+                  className="px-4 py-2.5 rounded-xl border border-stone-300 text-stone-700 text-sm font-semibold hover:bg-stone-100 transition"
+                >
+                  አጽዳ
+                </button>
+                <Link
+                  href="/contact"
+                  onClick={() => setCartOpen(false)}
+                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-amber-600 text-white text-sm font-semibold hover:bg-amber-700 transition"
+                >
+                  ትዕዛዝ ላክ <ArrowRight size={16} />
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

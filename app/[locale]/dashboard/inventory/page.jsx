@@ -6,7 +6,7 @@ import {
   Plus, Search, Package, DollarSign, TrendingUp, AlertTriangle,
   Calendar, Phone, MapPin, User, Building2, X,
 } from 'lucide-react';
-import { formatETB, formatDate } from '@/lib/utils';
+import { formatETB } from '@/lib/utils';
 import { apiFetch } from '@/lib/api';
 import Card from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
@@ -15,6 +15,261 @@ import Modal from '@/components/ui/Modal';
 import ConfirmModal from '@/components/ui/ConfirmModal';
 import ActionButtons from '@/components/ui/ActionButtons';
 import toast from 'react-hot-toast';
+
+// ---------- Ethiopian Calendar Helpers (Ethiopian Calendar Only) ----------
+const ETHIOPIAN_TIME_ZONE = 'Africa/Addis_Ababa';
+
+const ETHIOPIAN_MONTHS = [
+  { value: 1,  label: 'መስከረም' },
+  { value: 2,  label: 'ጥቅምት' },
+  { value: 3,  label: 'ኅዳር' },
+  { value: 4,  label: 'ታኅሣሥ' },
+  { value: 5,  label: 'ጥር' },
+  { value: 6,  label: 'የካቲት' },
+  { value: 7,  label: 'መጋቢት' },
+  { value: 8,  label: 'ሚያዝያ' },
+  { value: 9,  label: 'ግንቦት' },
+  { value: 10, label: 'ሰኔ' },
+  { value: 11, label: 'ሐምሌ' },
+  { value: 12, label: 'ነሐሴ' },
+  { value: 13, label: 'ጳጉሜን' },
+];
+
+const ETHIOPIAN_WEEKDAYS_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+const formatEthiopianDate = (date) => {
+  if (!date) return '-';
+  const d = date instanceof Date ? date : new Date(date);
+  if (isNaN(d.getTime())) return '-';
+  try {
+    return new Intl.DateTimeFormat('am-ET-u-ca-ethiopic', {
+      timeZone: ETHIOPIAN_TIME_ZONE,
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    }).format(d);
+  } catch {
+    return d.toLocaleDateString('am-ET', { timeZone: ETHIOPIAN_TIME_ZONE });
+  }
+};
+
+function toUtcNoonDate(isoStr) {
+  if (!isoStr) return new Date(NaN);
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(isoStr).trim());
+  if (match) {
+    return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12, 0, 0));
+  }
+  const d = new Date(isoStr);
+  if (isNaN(d.getTime())) return new Date(NaN);
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 12, 0, 0));
+}
+
+function toIsoDateFromUtc(date) {
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(date.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function getEthDateParts(isoStr) {
+  const date = toUtcNoonDate(isoStr);
+  if (isNaN(date.getTime())) return null;
+
+  const weekdayStr = new Intl.DateTimeFormat('en-US', {
+    timeZone: ETHIOPIAN_TIME_ZONE,
+    weekday: 'short',
+  }).format(date);
+  const dow = ETHIOPIAN_WEEKDAYS_EN.indexOf(weekdayStr);
+
+  try {
+    const parts = new Intl.DateTimeFormat('en-u-ca-ethiopic', {
+      timeZone: ETHIOPIAN_TIME_ZONE,
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+    }).formatToParts(date);
+
+    const year = Number(parts.find((p) => p.type === 'year')?.value);
+    const month = Number(parts.find((p) => p.type === 'month')?.value);
+    const day = Number(parts.find((p) => p.type === 'day')?.value);
+    if (year && month && day) {
+      return { year, month, day, dow: dow >= 0 ? dow : 0 };
+    }
+  } catch {
+    // Fallback handled below
+  }
+  return null;
+}
+
+function ethToGregorianIso(ethYear, ethMonth, ethDay) {
+  const isLeap = (ethYear + 1) % 4 === 0;
+  const maxDay = ethMonth === 13 ? (isLeap ? 6 : 5) : 30;
+  const clampedDay = Math.min(Math.max(1, ethDay), maxDay);
+
+  let gYear = ethYear + 7;
+  let gMonth = ethMonth + 8;
+  if (gMonth > 12) {
+    gMonth -= 12;
+    gYear += 1;
+  }
+
+  const candidate = new Date(Date.UTC(gYear, gMonth - 1, Math.min(clampedDay + 10, 28), 12, 0, 0));
+  for (let i = -15; i <= 15; i++) {
+    const test = new Date(candidate.getTime() + i * 86400000);
+    const p = getEthDateParts(toIsoDateFromUtc(test));
+    if (p && p.year === ethYear && p.month === ethMonth && p.day === clampedDay) {
+      return toIsoDateFromUtc(test);
+    }
+  }
+  return toIsoDateFromUtc(candidate);
+}
+
+function getEthMonthDays(ethYear, ethMonth) {
+  const isLeap = (ethYear + 1) % 4 === 0;
+  const totalDays = ethMonth === 13 ? (isLeap ? 6 : 5) : 30;
+  const days = [];
+  for (let d = 1; d <= totalDays; d++) {
+    const iso = ethToGregorianIso(ethYear, ethMonth, d);
+    const parts = getEthDateParts(iso);
+    days.push({ day: d, iso, dow: parts ? parts.dow : 0 });
+  }
+  return days;
+}
+
+function EthiopianDateInput({ value, onChange, required = false, placeholder = 'የኢትዮጵያ ቀን ይምረጡ' }) {
+  const initialParts = useMemo(() => {
+    const p = getEthDateParts(value);
+    return p || { year: 2019, month: 3, day: 13, dow: 0 };
+  }, [value]);
+
+  const [open, setOpen] = useState(false);
+  const [viewYear, setViewYear] = useState(initialParts.year);
+  const [viewMonth, setViewMonth] = useState(initialParts.month);
+
+  useEffect(() => {
+    const p = getEthDateParts(value);
+    if (p) {
+      setViewYear(p.year);
+      setViewMonth(p.month);
+    }
+  }, [value]);
+
+  const monthDays = useMemo(() => getEthMonthDays(viewYear, viewMonth), [viewYear, viewMonth]);
+  const leadingBlanks = monthDays.length > 0 ? monthDays[0].dow : 0;
+
+  const selectDate = (iso) => {
+    onChange(iso);
+    setOpen(false);
+  };
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white hover:border-blue-300 hover:bg-blue-50/40 focus:border-brand focus:outline-none text-xs sm:text-sm text-gray-800 flex items-center justify-between gap-2 text-left transition"
+      >
+        <span className={value ? 'text-gray-800 font-medium truncate' : 'text-gray-400 truncate'}>
+          {value ? formatEthiopianDate(`${value}T12:00:00`) : placeholder}
+        </span>
+        <Calendar size={15} className="text-gray-400 flex-shrink-0" />
+      </button>
+      {required && (
+        <input
+          type="text"
+          tabIndex={-1}
+          aria-hidden="true"
+          value={value || ''}
+          onChange={() => {}}
+          required
+          className="sr-only"
+        />
+      )}
+
+      {open && (
+        <div className="absolute z-30 mt-1.5 w-72 bg-white border border-gray-200 rounded-2xl shadow-xl p-3">
+          <div className="flex items-center justify-between gap-2 mb-2.5">
+            <select
+              value={viewMonth}
+              onChange={(e) => setViewMonth(Number(e.target.value))}
+              className="px-2.5 py-1 border border-gray-200 rounded-lg text-xs font-semibold text-gray-800 bg-gray-50 focus:outline-none focus:ring-1 focus:ring-brand"
+            >
+              {ETHIOPIAN_MONTHS.map((m) => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
+            <input
+              type="number"
+              value={viewYear}
+              onChange={(e) => setViewYear(Number(e.target.value) || 2019)}
+              className="w-20 px-2 py-1 border border-gray-200 rounded-lg text-xs font-semibold text-gray-800 bg-gray-50 focus:outline-none focus:ring-1 focus:ring-brand"
+            />
+          </div>
+
+          <div className="grid grid-cols-7 text-center text-[10px] font-semibold text-gray-400 mb-1">
+            <span>እሑድ</span>
+            <span>ሰኞ</span>
+            <span>ማክሰ</span>
+            <span>ረቡዕ</span>
+            <span>ሐሙስ</span>
+            <span>ዓርብ</span>
+            <span>ቅዳሜ</span>
+          </div>
+
+          <div className="grid grid-cols-7 gap-1 text-center text-xs">
+            {Array.from({ length: leadingBlanks }).map((_, idx) => (
+              <span key={`b-${idx}`} />
+            ))}
+            {monthDays.map((d) => {
+              const isSelected = value === d.iso;
+              return (
+                <button
+                  key={d.day}
+                  type="button"
+                  onClick={() => selectDate(d.iso)}
+                  className={`h-7 w-full rounded-lg text-xs font-medium transition ${
+                    isSelected
+                      ? 'bg-brand text-white font-bold shadow-sm'
+                      : 'text-gray-700 hover:bg-blue-50 hover:text-blue-700'
+                  }`}
+                >
+                  {d.day}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-gray-100 text-xs">
+            <button
+              type="button"
+              onClick={() => selectDate(toIsoDateFromUtc(new Date()))}
+              className="text-brand font-semibold hover:underline"
+            >
+              ዛሬ
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onChange('');
+                setOpen(false);
+              }}
+              className="text-gray-400 hover:text-gray-600 font-medium"
+            >
+              አጽዳ
+            </button>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="text-gray-500 hover:text-gray-700 font-medium"
+            >
+              ዝጋ
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function InventoryPage() {
   const { user } = useAuth();
@@ -26,6 +281,7 @@ export default function InventoryPage() {
 
   const [search, setSearch] = useState('');
   const [branchFilter, setBranchFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [viewItem, setViewItem] = useState(null);
@@ -73,9 +329,17 @@ export default function InventoryPage() {
         (i.supplier || '').toLowerCase().includes(q);
       const matchBranch = branchFilter === 'all' ||
         (i.branch?._id || i.branch) === branchFilter;
-      return matchSearch && matchBranch;
+
+      let matchDate = true;
+      if (dateFilter) {
+        const rawDate = i.receivedDate || i.createdAt;
+        const itemIso = rawDate ? toIsoDateFromUtc(toUtcNoonDate(rawDate)) : '';
+        matchDate = itemIso === dateFilter;
+      }
+
+      return matchSearch && matchBranch && matchDate;
     });
-  }, [roleFiltered, search, branchFilter]);
+  }, [roleFiltered, search, branchFilter, dateFilter]);
 
   const stats = useMemo(() => {
     const total = roleFiltered.length;
@@ -174,7 +438,7 @@ export default function InventoryPage() {
       </div>
 
       <Card padding="sm">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
@@ -203,6 +467,12 @@ export default function InventoryPage() {
               </span>
             </div>
           )}
+
+          <EthiopianDateInput
+            value={dateFilter}
+            onChange={setDateFilter}
+            placeholder="በኢትዮጵያ ቀን አጣራ"
+          />
         </div>
       </Card>
 
@@ -237,7 +507,6 @@ export default function InventoryPage() {
               ) : (
                 filtered.map((item) => {
                   const branchName = item.branch?.name || '-';
-                  const createdName = item.createdBy?.fullName || '-';
                   return (
                     <tr key={item._id} className="border-b border-gray-100 hover:bg-gray-50">
                       <td className="px-4 py-3 font-mono text-xs text-brand font-medium">{item.itemCode}</td>
@@ -258,7 +527,9 @@ export default function InventoryPage() {
                           {branchName}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-xs text-gray-500">{formatDate(item.receivedDate)}</td>
+                      <td className="px-4 py-3 text-xs text-gray-500">
+                        {formatEthiopianDate(item.receivedDate || item.createdAt)}
+                      </td>
                       <td className="px-4 py-3">
                         <ActionButtons
                           onView={() => setViewItem(item)}
@@ -340,6 +611,10 @@ function ItemForm({ item, branches, onSave, onCancel, currentUser }) {
     ? (typeof currentUser.branch === 'object' ? currentUser.branch._id : currentUser.branch)
     : (item?.branch?._id || item?.branch || '');
 
+  const defaultDate = item?.receivedDate
+    ? toIsoDateFromUtc(toUtcNoonDate(item.receivedDate))
+    : toIsoDateFromUtc(new Date());
+
   const [form, setForm] = useState({
     itemType: item?.itemType || '',
     quantity: item?.quantity || 0,
@@ -347,6 +622,7 @@ function ItemForm({ item, branches, onSave, onCancel, currentUser }) {
     supplier: item?.supplier || '',
     description: item?.description || '',
     branch: defaultBranch,
+    receivedDate: defaultDate,
   });
 
   const onChange = (e) => {
@@ -367,6 +643,7 @@ function ItemForm({ item, branches, onSave, onCancel, currentUser }) {
       supplier: form.supplier || undefined,
       description: form.description || undefined,
       branch: form.branch || null,
+      receivedDate: form.receivedDate || undefined,
     });
   };
 
@@ -391,12 +668,21 @@ function ItemForm({ item, branches, onSave, onCancel, currentUser }) {
         </FormField>
       </div>
 
-      <FormField label="አቅራቢ">
-        <input name="supplier" value={form.supplier} onChange={onChange}
-          placeholder="የአቅራቢ ስም"
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
-        />
-      </FormField>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <FormField label="አቅራቢ">
+          <input name="supplier" value={form.supplier} onChange={onChange}
+            placeholder="የአቅራቢ ስም"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
+          />
+        </FormField>
+
+        <FormField label="ቀን (የኢትዮጵያ)">
+          <EthiopianDateInput
+            value={form.receivedDate}
+            onChange={(val) => setForm((f) => ({ ...f, receivedDate: val }))}
+          />
+        </FormField>
+      </div>
 
       <FormField label="ቅርንጫፍ">
         {isSeller ? (
@@ -473,7 +759,7 @@ function ItemView({ item }) {
         <Row label="አቅራቢ" value={item.supplier || '-'} icon={User} />
         <Row label="ቅርንጫፍ" value={item.branch?.name || '-'} icon={Building2} />
         <Row label="መግለጫ" value={item.description || '-'} />
-        <Row label="ቀን" value={formatDate(item.receivedDate)} icon={Calendar} />
+        <Row label="ቀን" value={formatEthiopianDate(item.receivedDate || item.createdAt)} icon={Calendar} />
         <Row label="የተቀበለ" value={item.createdBy?.fullName || '-'} icon={User} />
       </div>
     </div>

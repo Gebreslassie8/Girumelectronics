@@ -7,14 +7,44 @@
   --color-brand: #1d4ed8;
   --color-brand-dark: #1e3a8a;
   --color-brand-light: #3b82f6;
+  --color-sys-bg: #f5f5f4;
+  --color-sys-accent: #b45309;
+}
+
+/* System-wide Appearance Themes (አቀራረብ - ለሲስተሙ ሙሉ) */
+:root,
+html[data-theme="warm-stone"] {
+  --sys-bg: #f5f5f4;
+  --sys-sidebar-bg: #fafaf9;
+  --sys-header-bg: #ffffff;
+  --sys-border: #e7e5e4;
+  --sys-accent: #b45309;
+}
+
+html[data-theme="sky-slate"] {
+  --sys-bg: #e0f2fe;
+  --sys-sidebar-bg: #f0f9ff;
+  --sys-header-bg: #f8fafc;
+  --sys-border: #bae6fd;
+  --sys-accent: #0284c7;
+}
+
+html[data-theme="emerald-mist"] {
+  --sys-bg: #d1fae5;
+  --sys-sidebar-bg: #ecfdf5;
+  --sys-header-bg: #f0fdf4;
+  --sys-border: #a7f3d0;
+  --sys-accent: #059669;
 }
 
 @layer base {
   html {
     font-family: 'Inter', 'Noto Sans Ethiopic', sans-serif;
+    background-color: var(--sys-bg, #f5f5f4);
   }
   body {
-    @apply bg-gray-50 text-gray-900 antialiased;
+    background-color: var(--sys-bg, #f5f5f4);
+    @apply text-gray-900 antialiased transition-colors duration-200;
   }
 }
 
@@ -40,10 +70,41 @@
   .label {
     @apply block text-sm font-medium text-gray-700 mb-1;
   }
-.card {
-  @apply bg-white rounded-xl shadow-sm border border-gray-200 p-5 transition-all duration-200;
+  .card {
+    @apply bg-white rounded-xl shadow-sm border border-gray-200 p-5 transition-all duration-200;
+  }
 }
+
+/* Sidebar & Header theme surfaces */
+.sys-sidebar,
+aside {
+  background-color: var(--sys-sidebar-bg, #fafaf9) !important;
+  border-color: var(--sys-border, #e7e5e4) !important;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
 }
+
+.sys-header,
+header {
+  background-color: var(--sys-header-bg, #ffffff) !important;
+  border-color: var(--sys-border, #e7e5e4) !important;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+/* Compact Mode across the entire system */
+html.compact-ui body {
+  font-size: 13px;
+}
+
+html.compact-ui .card {
+  padding: 0.875rem;
+}
+
+html.compact-ui table th,
+html.compact-ui table td {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+}
+
 /* ── Native <select> dropdown — force light mode for readability ── */
 select {
   color-scheme: light;
@@ -56,8 +117,9 @@ select option {
   background-color: #ffffff;
   padding: 8px;
 }
+
 /* ─────────────────────────────────────────────
-   html2canvas fix — force RGB colors
+   html2canvas fix — force RGB/hex colors
    (Tailwind v4 uses oklch/lab which html2canvas can't parse)
    ───────────────────────────────────────────── */
 @media screen {
@@ -66,15 +128,28 @@ select option {
   }
 }
 
-/* Fallback: if any element ends up with oklch/lab,
-   override with safe equivalent hex values */
+/* Apply system background across pages/layouts when using bg-gray-50 or theme container */
+html[data-theme="warm-stone"] .bg-gray-50,
+html[data-theme="warm-stone"] .system-bg {
+  background-color: #f5f5f4 !important;
+}
+
+html[data-theme="sky-slate"] .bg-gray-50,
+html[data-theme="sky-slate"] .system-bg {
+  background-color: #e0f2fe !important;
+}
+
+html[data-theme="emerald-mist"] .bg-gray-50,
+html[data-theme="emerald-mist"] .system-bg {
+  background-color: #d1fae5 !important;
+}
+
 [class*="bg-brand"], .bg-brand {
   background-color: #1e40af !important;
 }
 .text-brand, .text-brand-dark {
   color: #1e40af !important;
 }
-.bg-gray-50 { background-color: #f9fafb !important; }
 .bg-gray-100 { background-color: #f3f4f6 !important; }
 .text-gray-500 { color: #6b7280 !important; }
 .text-gray-700 { color: #374151 !important; }

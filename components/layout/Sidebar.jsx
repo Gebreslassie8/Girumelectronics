@@ -2,13 +2,13 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useAuth } from '@/components/providers/AuthProvider';
 import {
   LayoutDashboard, Users, UserCog, Warehouse, Package, ShoppingCart,
   Receipt, Building2, Wallet, TrendingDown, BarChart3, ShoppingBag,
-  Bell, Activity, Settings, X, ShieldCheck,
+  Bell, Activity, Settings, X, ShieldCheck, LogOut,
 } from 'lucide-react';
 
 // =====================================================================
@@ -24,14 +24,14 @@ const MENU = [
   { href: '/dashboard/inventory', key: 'warehouse', fallback: 'መጋዘን', icon: Warehouse,
     roles: ['admin', 'storekeeper'] },
   { href: '/dashboard/products', key: 'products', fallback: 'የሱቅ እቃዎች', icon: Package,
-    roles: ['admin', 'seller', 'storekeeper'] },
+    roles: ['admin', 'seller'] },
   { href: '/dashboard/orders', key: 'orders', fallback: 'ትዕዛዞች', icon: ShoppingCart,
-    roles: ['admin', 'seller', 'cashier', 'customer'] },
+    roles: ['admin', 'seller', 'cashier', 'storekeeper', 'customer'] },
   { href: '/dashboard/receipts', key: 'receipts', fallback: 'ደረሰኞች', icon: Receipt,
     roles: ['admin', 'seller', 'cashier', 'customer'] },
   { href: '/dashboard/branches', key: 'branches', fallback: 'ቅርንጫፎች', icon: Building2, roles: ['admin'] },
   { href: '/dashboard/warranty', key: 'warranty', fallback: 'ዋስትና', icon: ShieldCheck,
-    roles: ALL_ROLES },
+    roles: ['admin', 'seller', 'cashier', 'customer'] },
   {
     key: 'finance', fallback: 'ፋይናንስ', icon: Wallet, roles: ['admin', 'seller'],
     children: [
@@ -60,10 +60,13 @@ function stripLocalePrefix(pathname = '') {
 
 export default function Sidebar({ open = false, onClose = () => {} }) {
   const pathname = usePathname();
-  const { user, token } = useAuth();
+  const router = useRouter();
+  const auth = useAuth();
+  const { user, token } = auth || {};
   const t = useTranslations('nav');
   const role = user?.role || 'customer';
   const [unreadCount, setUnreadCount] = useState(0);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   const normalizedPath = stripLocalePrefix(pathname);
 
@@ -100,6 +103,26 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
       return v && v !== key ? v : fallback;
     } catch {
       return fallback;
+    }
+  };
+
+  const handleLogout = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      if (typeof auth?.logout === 'function') {
+        await auth.logout();
+      } else {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          credentials: 'include',
+        }).catch(() => {});
+      }
+    } finally {
+      onClose();
+      router.push('/login');
+      router.refresh();
+      setLoggingOut(false);
     }
   };
 
@@ -272,9 +295,20 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
           })}
         </nav>
 
-        {/* Footer */}
-        <div className="p-3 border-t border-gray-100 text-xs text-gray-400">
-          © {new Date().getFullYear()} {tr('brand', 'ግሩም ኤሌክትሮኒክስ')}
+        {/* Footer + Logout */}
+        <div className="p-3 border-t border-gray-100 space-y-2">
+          <button
+            type="button"
+            onClick={handleLogout}
+            disabled={loggingOut}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-red-600 bg-red-50 hover:bg-red-600 hover:text-white transition-colors disabled:opacity-60"
+          >
+            <LogOut size={16} />
+            <span>{loggingOut ? tr('loggingOut', 'በመውጣት ላይ...') : tr('logout', 'ውጣ')}</span>
+          </button>
+          <div className="text-xs text-gray-400 px-1">
+            © {new Date().getFullYear()} {tr('brand', 'ግሩም ኤሌክትሮኒክስ')}
+          </div>
         </div>
       </aside>
     </>

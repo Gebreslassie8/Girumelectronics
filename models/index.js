@@ -57,7 +57,7 @@ const userSchema = new mongoose.Schema(
     phone:   { type: String, required: [true, 'ስልክ ቁጥር ያስፈልጋል'], unique: true, trim: true, match: [PHONE_REGEX, PHONE_MSG] },
     email:   { type: String, lowercase: true, trim: true, unique: true, sparse: true },
     password:{ type: String, required: [true, 'ፓስወርድ ያስፈልጋል'], minlength: [6, 'ፓስወርድ ቢያንስ 6 ፊደል መሆን አለበት'], select: false },
-    role:    { type: String, enum: ['admin', 'owner', 'seller', 'customer'], default: 'customer' },
+    role:    { type: String, enum: ['admin', 'owner', 'seller', 'cashier', 'storekeeper', 'customer'], default: 'customer' },
     branch:  { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', default: null },
     address: { type: String, trim: true },
     avatar:  { type: String, trim: true },
@@ -92,12 +92,15 @@ const employeeSchema = new mongoose.Schema(
     status:      { type: String, enum: ['active', 'on_leave', 'suspended', 'terminated'], default: 'active' },
     branch:      { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', default: null },
     permissions: {
-      canSell:             { type: Boolean, default: true },
-      canManageInventory:  { type: Boolean, default: false },
-      canManageOrders:     { type: Boolean, default: true },
-      canIssueReceipts:    { type: Boolean, default: true },
-      canViewAnalytics:    { type: Boolean, default: false },
-      canManageEmployees:  { type: Boolean, default: false },
+      type: mongoose.Schema.Types.Mixed,
+      default: () => ({
+        canSell: true,
+        canManageInventory: false,
+        canManageOrders: true,
+        canIssueReceipts: true,
+        canViewAnalytics: false,
+        canManageEmployees: false,
+      }),
     },
     emergencyContact: {
       name:  { type: String },
@@ -112,6 +115,9 @@ employeeSchema.index({ status: 1 });
 
 employeeSchema.pre('save', async function () {
   if (!this.employeeCode) this.employeeCode = await nextCode('EMP', 'employee');
+  if (this.isModified('permissions')) {
+    this.markModified('permissions');
+  }
 });
 
 // =====================================================================
@@ -552,17 +558,17 @@ notificationSchema.index({ createdAt: -1 });
 // =====================================================================
 // 📦 Model registration (prevent OverwriteModelError)
 // =====================================================================
-export const Branch      = mongoose.models.Branch      || mongoose.model('Branch', branchSchema);
-export const User        = mongoose.models.User        || mongoose.model('User', userSchema);
-export const Employee    = mongoose.models.Employee    || mongoose.model('Employee', employeeSchema);
-export const Inventory   = mongoose.models.Inventory   || mongoose.model('Inventory', inventorySchema);
-export const Product     = mongoose.models.Product     || mongoose.model('Product', productSchema);
-export const Order       = mongoose.models.Order       || mongoose.model('Order', orderSchema);
-export const Receipt     = mongoose.models.Receipt     || mongoose.model('Receipt', receiptSchema);
-export const Expense     = mongoose.models.Expense     || mongoose.model('Expense', expenseSchema);
-export const Revenue     = mongoose.models.Revenue     || mongoose.model('Revenue', revenueSchema);
-export const Transaction = mongoose.models.Transaction || mongoose.model('Transaction', transactionSchema);
-export const Warranty    = mongoose.models.Warranty    || mongoose.model('Warranty', warrantySchema);
+export const Branch       = mongoose.models.Branch       || mongoose.model('Branch', branchSchema);
+export const User         = mongoose.models.User         || mongoose.model('User', userSchema);
+export const Employee     = mongoose.models.Employee     || mongoose.model('Employee', employeeSchema);
+export const Inventory    = mongoose.models.Inventory    || mongoose.model('Inventory', inventorySchema);
+export const Product      = mongoose.models.Product      || mongoose.model('Product', productSchema);
+export const Order        = mongoose.models.Order        || mongoose.model('Order', orderSchema);
+export const Receipt      = mongoose.models.Receipt      || mongoose.model('Receipt', receiptSchema);
+export const Expense      = mongoose.models.Expense      || mongoose.model('Expense', expenseSchema);
+export const Revenue      = mongoose.models.Revenue      || mongoose.model('Revenue', revenueSchema);
+export const Transaction  = mongoose.models.Transaction  || mongoose.model('Transaction', transactionSchema);
+export const Warranty     = mongoose.models.Warranty     || mongoose.model('Warranty', warrantySchema);
 export const Notification = mongoose.models.Notification || mongoose.model('Notification', notificationSchema);
 
 // =====================================================================

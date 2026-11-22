@@ -29,8 +29,6 @@ export async function POST(req) {
       return NextResponse.json({ error: 'paidTo is required' }, { status: 400 });
     if (!body.category)
       return NextResponse.json({ error: 'category is required' }, { status: 400 });
-    if (!body.description)
-      return NextResponse.json({ error: 'description is required' }, { status: 400 });
     if (body.amount == null || isNaN(Number(body.amount)))
       return NextResponse.json({ error: 'amount is required' }, { status: 400 });
 
@@ -41,9 +39,12 @@ export async function POST(req) {
     if (!branch)
       return NextResponse.json({ error: 'branch is required' }, { status: 400 });
 
+    const cleanDescription =
+      body.description != null ? String(body.description).trim() : '';
+
     const doc = await Expense.create({
       category:      body.category,
-      description:   body.description,
+      description:   cleanDescription || undefined,
       paidTo:        String(body.paidTo).trim(),
       amount:        Number(body.amount),
       paymentMethod: body.paymentMethod || 'cash',

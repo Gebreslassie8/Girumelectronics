@@ -4,8 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/components/providers/AuthProvider';
 import {
-  Plus, Search, Wallet, DollarSign, Calendar, CreditCard,
-  Banknote, Building2, User, Loader2, ArrowLeftRight, Tag,
+  Plus, Search, Wallet, DollarSign, Calendar,
+  Banknote, Building2, Loader2, ArrowLeftRight,
 } from 'lucide-react';
 import { formatETB } from '@/lib/utils';
 import Card from '@/components/ui/Card';
@@ -35,6 +35,17 @@ const ETHIOPIAN_MONTHS = [
 ];
 
 const ETHIOPIAN_WEEKDAYS_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+const VALID_CATEGORIES = [
+  'purchase',
+  'salary',
+  'rent',
+  'utilities',
+  'transport',
+  'maintenance',
+  'marketing',
+  'other',
+];
 
 const formatEthiopianDate = (date) => {
   if (!date) return '—';
@@ -261,49 +272,68 @@ function EthiopianDateInput({ value, onChange, required = false }) {
 }
 
 const T = {
-  expenses:         '\u12C8\u132A\u12CE\u127D',
-  total:            '\u1320\u1245\u120B\u120B',
-  totalAmount:      '\u1320\u1245\u120B\u120B \u12C8\u132A',
-  newExpense:       '\u12A0\u12F2\u1235 \u12C8\u132A',
-  cash:             '\u1325\u122C \u1308\u1295\u12D8\u1265',
-  transfer:         '\u12DD\u12CD\u12CD\u122A',
-  nonCash:          '\u12EB\u120D\u1206\u1290 \u1325\u122C',
-  search:           '\u1348\u120D\u130D (\u12E8\u1263\u1208\u1264\u1275 \u1235\u121D\u1363 \u121D\u12AD\u129D\u12EB\u1275)...',
-  allReasons:       '\u1201\u1209\u121D \u121D\u12AD\u129D\u12EB\u1275',
-  allPayments:      '\u1201\u1209\u121D \u12E8\u12AD\u134D\u12EB \u12D8\u12F4\u12CE\u127D',
-  allBranches:      '\u1201\u1209\u121D \u1245\u122D\u1295\u132B\u134E\u127D',
-  branch:           '\u1245\u122D\u1295\u132B\u134D',
-  ownerName:        '\u12E8\u1263\u1208\u1264\u1275 \u1235\u121D',
-  reason:           '\u12E8\u1270\u12A8\u1348\u1208\u1260\u1275 \u121D\u12AD\u129D\u12EB\u1275',
-  amount:           '\u1218\u1320\u1295',
-  paymentMethod:    '\u12E8\u12AD\u134D\u12EB \u12D8\u12F4',
-  date:             '\u1240\u1295',
-  action:           '\u1270\u130D\u1263\u122D',
-  noData:           '\u121D\u1295\u121D \u12C8\u132A \u12A0\u120D\u1270\u1308\u1298\u121D',
-  loading:          '\u1260\u1218\u132B\u1295 \u120B\u12ED...',
-  error:            '\u1235\u1205\u1270\u1275 \u1270\u1348\u1325\u122F\u120D',
-  retry:            '\u12A5\u1295\u12F0\u1308\u1293 \u121E\u12AD\u122D',
-  ownerPlaceholder: '\u121D\u1233\u120C: \u12A0\u1260\u1260 \u12A8\u1260\u12F0',
-  reasonPlaceholder:'\u121D\u1233\u120C: \u12E8\u1262\u122E \u12AA\u122B\u12ED',
-  cancel:           '\u1230\u122D\u12DD',
-  save:             '\u1308\u121D\u122D',
-  update:           '\u12A0\u1235\u1270\u12AB\u12AD\u120D',
-  deleteTitle:      '\u12C8\u132A \u12ED\u1230\u1228\u12DD?',
-  deleteMsg:        '\u12ED\u1205\u1295 \u12C8\u132A \u1218\u1230\u1228\u12DD \u12ED\u1348\u120D\u130B\u1209?',
-  confirmDelete:    '\u12A0\u12CE\u1363 \u1230\u122D\u12DD',
-  keep:             '\u1270\u12C8\u12CD',
-  branchReq:        '\u1245\u122D\u1295\u132B\u134D \u12ED\u121D\u1228\u1321',
-  successAdd:       '\u12C8\u132A \u1270\u1328\u121D\u122F\u120D',
-  successUpdate:    '\u12C8\u132A \u1270\u1235\u1270\u12AB\u12AD\u120F\u120D',
-  successDelete:    '\u12C8\u132A \u1270\u1230\u122D\u12DF\u120D',
-  createErr:        '\u1235\u1205\u1270\u1275 \u1270\u1348\u1325\u122F\u120D',
-  branchNotFound:   '\u1245\u122D\u1295\u132B\u134D \u12DD\u122D\u12DD\u120D \u12A0\u120D\u1270\u1308\u1298\u121D \u2014 /api/branches \u12EB\u1235\u1348\u120D\u130B\u120D',
+  expenses:          'ወጪዎች',
+  total:             'ጠቅላላ',
+  totalAmount:       'ጠቅላላ ወጪ',
+  newExpense:        'አዲስ ወጪ',
+  cash:              'ጥሬ ገንዘብ',
+  transfer:          'ዝውውር',
+  nonCash:           'ያልሆነ ጥሬ',
+  search:            'ፈልግ (የባለቤት ስም፣ ምክንያት)...',
+  allReasons:        'ሁሉም ምክንያት',
+  allPayments:       'ሁሉም የክፍያ ዘዴዎች',
+  allBranches:       'ሁሉም ቅርንጫፎች',
+  branch:            'ቅርንጫፍ',
+  ownerName:         'የባለቤት ስም',
+  reason:            'የተከፈለበት ምክንያት',
+  amount:            'መጠን',
+  paymentMethod:     'የክፍያ ዘዴ',
+  date:              'ቀን',
+  action:            'ተግባር',
+  noData:            'ምንም ወጪ አልተገኘም',
+  loading:           'በመጫን ላይ...',
+  error:             'ስህተት ተፈጥሯል',
+  retry:             'እንደገና ሞክር',
+  ownerPlaceholder:  'ምሳሌ፡ አበበ ከበደ',
+  reasonPlaceholder: 'ምሳሌ፡ የቢሮ ኪራይ ወይም ደመወዝ',
+  cancel:            'ሰርዝ',
+  save:              'ገምር',
+  update:            'አስተካክል',
+  deleteTitle:       'ወጪ ይሰረዝ?',
+  deleteMsg:         'ይህን ወጪ መሰረዝ ይፈልጋሉ?',
+  confirmDelete:     'አዎ፣ ሰርዝ',
+  keep:              'ተወው',
+  branchReq:         'ቅርንጫፍ ይምረጡ',
+  successAdd:        'ወጪ ተጨምሯል',
+  successUpdate:     'ወጪ ተስተካክሏል',
+  successDelete:     'ወጪ ተሰርዟል',
+  createErr:         'ስህተት ተፈጥሯል',
+  branchNotFound:    'ቅርንጫፍ ዝርዝር አልተገኘም — /api/branches ያስፈልጋል',
 };
 
 const PAYMENT_METHODS = {
-  cash:     { label: '\u1325\u122C \u1308\u1295\u12D8\u1265', color: 'green' },
-  transfer: { label: '\u12DD\u12CD\u12CD\u122A',           color: 'blue'  },
+  cash: { label: 'ጥሬ ገንዘብ', color: 'green' },
+  bank: { label: 'ዝውውር',     color: 'blue'  },
 };
+
+function inferCategoryFromReason(rawReason) {
+  const lower = String(rawReason || '').trim().toLowerCase();
+  if (VALID_CATEGORIES.includes(lower)) return lower;
+  if (lower.includes('salary') || lower.includes('ደመወዝ')) return 'salary';
+  if (lower.includes('rent') || lower.includes('ኪራይ')) return 'rent';
+  if (lower.includes('util') || lower.includes('ኤሌክትሪክ') || lower.includes('ውሃ') || lower.includes('መብራት')) return 'utilities';
+  if (lower.includes('trans') || lower.includes('ትራንስፖርት') || lower.includes('ነዳጅ')) return 'transport';
+  if (lower.includes('maint') || lower.includes('ጥገና')) return 'maintenance';
+  if (lower.includes('market') || lower.includes('ማስታወቂያ')) return 'marketing';
+  if (lower.includes('purch') || lower.includes('ግዢ') || lower.includes('ዕቃ')) return 'purchase';
+  return 'other';
+}
+
+function normalizePaymentMethod(method) {
+  if (method === 'cash') return 'cash';
+  if (['bank', 'transfer', 'ዝውውር'].includes(method)) return 'bank';
+  return 'other';
+}
 
 export default function ExpensesPage() {
   const { user } = useAuth();
@@ -323,7 +353,7 @@ export default function ExpensesPage() {
   const [deleting, setDeleting] = useState(false);
 
   const canManage = ['admin', 'owner', 'seller'].includes(user?.role);
-  const canDelete = ['admin', 'owner'].includes(user?.role);
+  const canDelete = ['admin', 'owner','seller'].includes(user?.role);
   const userBranchId = useMemo(() => {
     if (!user?.branch) return null;
     return typeof user.branch === 'object' ? user.branch._id : user.branch;
@@ -356,7 +386,7 @@ export default function ExpensesPage() {
   }, [expenses, user, userBranchId]);
 
   const uniqueReasons = useMemo(() => {
-    const s = new Set(roleFiltered.map((e) => e.reason || e.category || e.description).filter(Boolean));
+    const s = new Set(roleFiltered.map((e) => e.description || e.reason || e.category).filter(Boolean));
     return [...s];
   }, [roleFiltered]);
 
@@ -364,10 +394,12 @@ export default function ExpensesPage() {
     return roleFiltered.filter((e) => {
       const q = search.toLowerCase();
       const ownerVal = (e.paidTo || e.ownerName || '').toLowerCase();
-      const reasonVal = (e.reason || e.category || e.description || '').toLowerCase();
+      const reasonVal = (e.description || e.reason || e.category || '').toLowerCase();
       const matchSearch = ownerVal.includes(q) || reasonVal.includes(q);
-      const matchPayment = paymentFilter === 'all' || e.paymentMethod === paymentFilter;
-      const matchReason = reasonFilter === 'all' || (e.reason || e.category || e.description) === reasonFilter;
+      const pm = normalizePaymentMethod(e.paymentMethod);
+      const matchPayment = paymentFilter === 'all' || pm === paymentFilter;
+      const reasonLabel = e.description || e.reason || e.category || '';
+      const matchReason = reasonFilter === 'all' || reasonLabel === reasonFilter;
       const bid = typeof e.branch === 'object' ? e.branch?._id : e.branch;
       const matchBranch = branchFilter === 'all' || String(bid) === String(branchFilter);
       return matchSearch && matchPayment && matchReason && matchBranch;
@@ -377,7 +409,9 @@ export default function ExpensesPage() {
   const stats = useMemo(() => {
     const total = roleFiltered.length;
     const totalAmount = roleFiltered.reduce((s, e) => s + Number(e.amount || 0), 0);
-    const cashTotal = roleFiltered.filter((e) => e.paymentMethod === 'cash').reduce((s, e) => s + Number(e.amount || 0), 0);
+    const cashTotal = roleFiltered
+      .filter((e) => normalizePaymentMethod(e.paymentMethod) === 'cash')
+      .reduce((s, e) => s + Number(e.amount || 0), 0);
     return { total, totalAmount, cashTotal, nonCashTotal: totalAmount - cashTotal };
   }, [roleFiltered]);
 
@@ -537,9 +571,10 @@ export default function ExpensesPage() {
                 </td></tr>
               ) : (
                 filtered.map((expense) => {
-                  const payment = PAYMENT_METHODS[expense.paymentMethod] || { label: expense.paymentMethod, color: 'gray' };
+                  const pmKey = normalizePaymentMethod(expense.paymentMethod);
+                  const payment = PAYMENT_METHODS[pmKey] || { label: expense.paymentMethod, color: 'gray' };
                   const ownerText = expense.paidTo || expense.ownerName || '-';
-                  const reasonText = expense.reason || expense.category || expense.description || '-';
+                  const reasonText = expense.description || expense.reason || expense.category || '-';
                   return (
                     <tr key={expense._id} className="border-b border-gray-100 hover:bg-gray-50">
                       <td className="px-4 py-3 font-medium text-gray-800">{ownerText}</td>
@@ -579,7 +614,7 @@ export default function ExpensesPage() {
 
       <ConfirmModal isOpen={!!deleteTarget} onClose={() => setDeleteTarget(null)}
         onConfirm={handleDeleteConfirm} title={T.deleteTitle} message={T.deleteMsg}
-        itemName={deleteTarget?.paidTo || deleteTarget?.ownerName || deleteTarget?.reason}
+        itemName={deleteTarget?.paidTo || deleteTarget?.ownerName || deleteTarget?.description || deleteTarget?.reason}
         itemType={`${deleteTarget ? formatETB(deleteTarget.amount) : ''}`}
         confirmLabel={T.confirmDelete} cancelLabel={T.keep}
         loading={deleting} variant="danger" />
@@ -615,23 +650,31 @@ function ExpenseForm({ expense, onSave, onCancel, currentUser, branches, saving 
   const [form, setForm] = useState({
     ownerName: expense?.paidTo || expense?.ownerName || '',
     amount: expense?.amount ?? '',
-    reason: expense?.reason || expense?.category || expense?.description || '',
-    paymentMethod: expense?.paymentMethod === 'cash' ? 'cash' : 'transfer',
+    reason: expense?.description || expense?.reason || (expense?.category && expense.category !== 'other' ? expense.category : '') || '',
+    paymentMethod: normalizePaymentMethod(expense?.paymentMethod) === 'cash' ? 'cash' : 'bank',
     expenseDate: expense?.expenseDate ? String(expense.expenseDate).slice(0, 10) : new Date().toISOString().split('T')[0],
     branch: defaultBranch,
   });
 
-  const onChange = (e) => { const { name, value } = e.target; setForm((f) => ({ ...f, [name]: value })); };
+  const onChange = (e) => {
+    const { name, value } = e.target;
+    setForm((f) => ({ ...f, [name]: value }));
+  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!form.branch) { toast.error(T.branchReq); return; }
+    if (!form.branch) {
+      toast.error(T.branchReq);
+      return;
+    }
+    const cleanReason = form.reason.trim();
     onSave({
       paidTo: form.ownerName.trim(),
       ownerName: form.ownerName.trim(),
       amount: Number(form.amount),
-      reason: form.reason.trim(),
-      category: form.reason.trim(),
+      category: inferCategoryFromReason(cleanReason),
+      description: cleanReason || undefined,
+      reason: cleanReason || undefined,
       paymentMethod: form.paymentMethod,
       expenseDate: form.expenseDate,
       branch: form.branch,
@@ -641,22 +684,41 @@ function ExpenseForm({ expense, onSave, onCancel, currentUser, branches, saving 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <FormField label={T.ownerName + ' *'}>
-        <input name="ownerName" value={form.ownerName} onChange={onChange} required placeholder={T.ownerPlaceholder}
-          className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand" />
+        <input
+          name="ownerName"
+          value={form.ownerName}
+          onChange={onChange}
+          required
+          placeholder={T.ownerPlaceholder}
+          className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand"
+        />
       </FormField>
 
       <FormField label={T.amount + ' (ETB) *'}>
         <div className="relative">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm font-medium">ETB</span>
-          <input type="number" name="amount" value={form.amount} onChange={onChange}
-            required min={0} step="0.01" placeholder="0.00"
-            className="w-full pl-14 pr-3 py-2 border border-gray-300 rounded-xl text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand" />
+          <input
+            type="number"
+            name="amount"
+            value={form.amount}
+            onChange={onChange}
+            required
+            min={0}
+            step="0.01"
+            placeholder="0.00"
+            className="w-full pl-14 pr-3 py-2 border border-gray-300 rounded-xl text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand"
+          />
         </div>
       </FormField>
 
-      <FormField label={T.reason + ' *'}>
-        <input name="reason" value={form.reason} onChange={onChange} required placeholder={T.reasonPlaceholder}
-          className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand" />
+      <FormField label={T.reason}>
+        <input
+          name="reason"
+          value={form.reason}
+          onChange={onChange}
+          placeholder={T.reasonPlaceholder}
+          className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand"
+        />
       </FormField>
 
       <FormField label={T.paymentMethod + ' *'}>
@@ -695,18 +757,32 @@ function ExpenseForm({ expense, onSave, onCancel, currentUser, branches, saving 
         ) : branches.length === 0 ? (
           <div className="text-xs text-red-600">{T.branchNotFound}</div>
         ) : (
-          <select name="branch" value={form.branch} onChange={onChange} required
-            className="w-full px-3 py-2 border border-gray-300 rounded-xl bg-white text-sm focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand">
+          <select
+            name="branch"
+            value={form.branch}
+            onChange={onChange}
+            required
+            className="w-full px-3 py-2 border border-gray-300 rounded-xl bg-white text-sm focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand"
+          >
             {branches.map((b) => <option key={b._id} value={b._id}>{b.name}</option>)}
           </select>
         )}
       </FormField>
 
       <div className="flex gap-2.5 pt-3 border-t border-gray-200">
-        <button type="button" onClick={onCancel} disabled={saving}
-          className="flex-1 px-4 py-2.5 rounded-xl border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-50 transition">{T.cancel}</button>
-        <button type="submit" disabled={saving}
-          className="flex-1 px-4 py-2.5 rounded-xl bg-brand text-white font-semibold hover:bg-brand-dark disabled:opacity-50 flex items-center justify-center gap-2 transition">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={saving}
+          className="flex-1 px-4 py-2.5 rounded-xl border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-50 transition"
+        >
+          {T.cancel}
+        </button>
+        <button
+          type="submit"
+          disabled={saving}
+          className="flex-1 px-4 py-2.5 rounded-xl bg-brand text-white font-semibold hover:bg-brand-dark disabled:opacity-50 flex items-center justify-center gap-2 transition"
+        >
           {saving && <Loader2 size={16} className="animate-spin" />}
           {expense ? T.update : T.save}
         </button>
@@ -725,12 +801,13 @@ function FormField({ label, children }) {
 }
 
 function ExpenseView({ expense }) {
-  const payment = PAYMENT_METHODS[expense.paymentMethod] || { label: expense.paymentMethod, color: 'gray' };
+  const pmKey = normalizePaymentMethod(expense.paymentMethod);
+  const payment = PAYMENT_METHODS[pmKey] || { label: expense.paymentMethod, color: 'gray' };
   const ownerText = expense.paidTo || expense.ownerName || '-';
-  const reasonText = expense.reason || expense.category || expense.description || '-';
+  const reasonText = expense.description || expense.reason || expense.category || '-';
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 text-sm">
       <div className="flex items-center justify-between gap-3 p-4 rounded-2xl bg-gradient-to-r from-red-50 to-orange-50/70 border border-red-100">
         <div className="flex items-center gap-3 min-w-0">
           <div className="w-12 h-12 rounded-xl bg-red-600 text-white flex items-center justify-center flex-shrink-0 shadow-sm">
@@ -743,33 +820,34 @@ function ExpenseView({ expense }) {
         </div>
         <div className="text-right flex-shrink-0">
           <p className="text-xs text-gray-500">{T.amount}</p>
-          <p className="text-lg font-extrabold text-red-600">{formatETB(expense.amount)}</p>
+          <p className="font-extrabold text-red-600 text-lg">{formatETB(expense.amount)}</p>
         </div>
       </div>
 
-      <div className="rounded-2xl border border-gray-100 bg-gray-50/60 p-4 space-y-3 text-sm">
-        <Row label={T.ownerName} value={ownerText} icon={User} bold />
-        <Row label={T.reason} value={reasonText} icon={Tag} />
-        <div className="flex items-center justify-between gap-3 pt-1 border-t border-gray-200/70">
-          <span className="text-gray-500 flex items-center gap-1.5 text-xs font-medium">
-            <CreditCard size={13} /> {T.paymentMethod}:
-          </span>
+      <div className="space-y-2.5">
+        <div className="flex justify-between gap-3">
+          <span className="text-gray-500">{T.reason}:</span>
+          <span className="font-semibold text-gray-800 text-right">{reasonText}</span>
+        </div>
+        <div className="flex justify-between gap-3 items-center">
+          <span className="text-gray-500">{T.paymentMethod}:</span>
           <Badge color={payment.color}>{payment.label}</Badge>
         </div>
-        <Row label={T.branch} value={expense.branch?.name || '-'} icon={Building2} />
-        <Row label={T.date} value={formatEthiopianDate(expense.expenseDate)} icon={Calendar} />
+        <div className="flex justify-between gap-3">
+          <span className="text-gray-500">{T.branch}:</span>
+          <span className="font-medium text-gray-800">{expense.branch?.name || '-'}</span>
+        </div>
+        <div className="flex justify-between gap-3">
+          <span className="text-gray-500">{T.date}:</span>
+          <span className="font-medium text-gray-800">{formatEthiopianDate(expense.expenseDate)}</span>
+        </div>
+        {expense.recordedBy?.fullName && (
+          <div className="flex justify-between gap-3">
+            <span className="text-gray-500">መዝጋቢ:</span>
+            <span className="font-medium text-gray-800">{expense.recordedBy.fullName}</span>
+          </div>
+        )}
       </div>
-    </div>
-  );
-}
-
-function Row({ label, value, icon: Icon, bold, color }) {
-  return (
-    <div className="flex justify-between items-center gap-3">
-      <span className="text-gray-500 flex-shrink-0 flex items-center gap-1.5 text-xs font-medium">
-        {Icon && <Icon size={13} />} {label}:
-      </span>
-      <span className={`text-right ${bold ? 'font-semibold' : 'font-medium'} ${color || 'text-gray-800'}`}>{value}</span>
     </div>
   );
 }

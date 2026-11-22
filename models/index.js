@@ -355,7 +355,7 @@ const expenseSchema = new mongoose.Schema(
     },
     description: {
       type: String,
-      required: [true, 'መግለጫ ያስፈልጋል'],
+      required: [false, 'መግለጫ ያስፈልጋል'],
       trim: true,
     },
     amount: {

@@ -71,11 +71,15 @@ userSchema.index({ role: 1 });
 userSchema.index({ branch: 1 });
 
 userSchema.pre('save', async function () {
-  if (!this.isModified('password')) return;
+  if (!this.isModified('password') || !this.password) return;
+  // Prevent double-hashing when a route already hashed the password with bcrypt
+  if (/^\$2[aby]\$\d{2}\$/.test(this.password)) return;
   this.password = await bcrypt.hash(this.password, 12);
 });
+
 userSchema.methods.comparePassword = function (candidate) {
-  return bcrypt.compare(candidate, this.password);
+  if (!this.password || !candidate) return Promise.resolve(false);
+  return bcrypt.compare(String(candidate), String(this.password));
 };
 
 // =====================================================================

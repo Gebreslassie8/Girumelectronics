@@ -6,7 +6,7 @@ import {
   Plus, Search, Edit, Trash2, Eye, Users, DollarSign,
   UserCheck, UserX, Phone, Mail, Building2, Shield, Briefcase,
 } from 'lucide-react';
-import { formatETB, formatDate } from '@/lib/utils';
+import { formatETB } from '@/lib/utils';
 import {
   EMPLOYEE_STATUS, POSITIONS, DEPARTMENTS, PERMISSIONS_LIST,
 } from '@/lib/constants';
@@ -18,6 +18,38 @@ import Modal from '@/components/ui/Modal';
 import ConfirmModal from '@/components/ui/ConfirmModal';
 import ActionButtons from '@/components/ui/ActionButtons';
 import toast from 'react-hot-toast';
+
+const ETHIOPIAN_TIME_ZONE = 'Africa/Addis_Ababa';
+
+function formatEthiopianDate(input, options = {}) {
+  if (!input) return '-';
+  const date = input instanceof Date ? input : new Date(input);
+  if (Number.isNaN(date.getTime())) return String(input);
+
+  try {
+    return new Intl.DateTimeFormat('am-ET-u-ca-ethiopic', {
+      timeZone: ETHIOPIAN_TIME_ZONE,
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      ...options,
+    }).format(date);
+  } catch {
+    return date.toLocaleDateString('am-ET', {
+      timeZone: ETHIOPIAN_TIME_ZONE,
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      ...options,
+    });
+  }
+}
+
+function getPermissionValue(permissions, key) {
+  if (!permissions) return false;
+  if (permissions instanceof Map) return Boolean(permissions.get(key));
+  return Boolean(permissions[key]);
+}
 
 export default function EmployeesPage() {
   const { user } = useAuth();
@@ -103,17 +135,38 @@ export default function EmployeesPage() {
   const handleSave = async (data) => {
     try {
       if (editingEmployee) {
-        const updated = await apiFetch('/employees/' + editingEmployee._id, {
+        const res = await apiFetch('/employees/' + editingEmployee._id, {
           method: 'PATCH',
           body: JSON.stringify(data),
         });
-        setEmployees((prev) => prev.map((e) => (e._id === editingEmployee._id ? updated : e)));
+        const serverEmp = res?.employee || res || {};
+        const merged = {
+          ...editingEmployee,
+          ...serverEmp,
+          permissions: {
+            ...(editingEmployee.permissions || {}),
+            ...(serverEmp.permissions || {}),
+            ...(data.permissions || {}),
+          },
+        };
+        setEmployees((prev) => prev.map((e) => (e._id === editingEmployee._id ? merged : e)));
+        if (viewEmployee?._id === editingEmployee._id) {
+          setViewEmployee(merged);
+        }
         toast.success('ሠራተኛ ተስተካክሏል');
       } else {
-        const created = await apiFetch('/employees', {
+        const res = await apiFetch('/employees', {
           method: 'POST',
           body: JSON.stringify(data),
         });
+        const createdEmp = res?.employee || res || {};
+        const created = {
+          ...createdEmp,
+          permissions: {
+            ...(data.permissions || {}),
+            ...(createdEmp.permissions || {}),
+          },
+        };
         setEmployees((prev) => [created, ...prev]);
         toast.success('ሠራተኛ ተጨምሯል');
       }
@@ -351,13 +404,18 @@ function EmployeeForm({ employee, branches, onSave, onCancel }) {
     branch: employee?.branch?._id || '',
     emergencyName: employee?.emergencyContact?.name || '',
     emergencyPhone: employee?.emergencyContact?.phone || '',
-    permissions: employee?.permissions || {
+    permissions: {
       canSell: true,
       canManageInventory: false,
       canManageOrders: true,
       canIssueReceipts: true,
       canViewAnalytics: false,
       canManageEmployees: false,
+      ...(employee?.permissions && typeof employee.permissions === 'object'
+        ? (employee.permissions instanceof Map
+            ? Object.fromEntries(employee.permissions)
+            : employee.permissions)
+        : {}),
     },
   });
 
@@ -367,10 +425,10 @@ function EmployeeForm({ employee, branches, onSave, onCancel }) {
   };
 
   const togglePermission = (key) => {
-    setForm({
-      ...form,
-      permissions: { ...form.permissions, [key]: !form.permissions[key] },
-    });
+    setForm((prev) => ({
+      ...prev,
+      permissions: { ...(prev.permissions || {}), [key]: !prev.permissions?.[key] },
+    }));
   };
 
   const handleSubmit = (e) => {
@@ -471,7 +529,7 @@ function EmployeeForm({ employee, branches, onSave, onCancel }) {
             <label key={perm.key} className="flex items-center gap-2 cursor-pointer text-sm">
               <input
                 type="checkbox"
-                checked={form.permissions[perm.key]}
+                checked={Boolean(form.permissions?.[perm.key])}
                 onChange={() => togglePermission(perm.key)}
                 className="w-4 h-4 rounded border-gray-300 text-brand focus:ring-brand"
               />
@@ -548,7 +606,7 @@ function EmployeeView({ employee }) {
         <Row label="ክፍል" value={employee.department} />
         <Row label="ደመወዝ" value={formatETB(employee.salary || 0)} bold color="text-brand" />
         <Row label="ቅርንጫፍ" value={employee.branch?.name || '-'} />
-        <Row label="ተቀጠረ" value={formatDate(employee.hireDate)} />
+        <Row label="ተቀጠረ" value={formatEthiopianDate(employee.hireDate)} />
         <div className="flex justify-between items-center">
           <span className="text-gray-500">ሁኔታ:</span>
           <Badge color={status.color}>{status.label}</Badge>
@@ -567,18 +625,21 @@ function EmployeeView({ employee }) {
         <div className="pt-4 border-t border-gray-100 mt-4">
           <p className="text-xs font-semibold text-gray-600 mb-2">ፈቃዶች</p>
           <div className="grid grid-cols-2 gap-1.5">
-            {PERMISSIONS_LIST.map((perm) => (
-              <div key={perm.key} className="flex items-center gap-1.5 text-xs">
-                <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${
-                  employee.permissions[perm.key] ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'
-                }`}>
-                  {employee.permissions[perm.key] ? '✓' : '✕'}
-                </span>
-                <span className={employee.permissions[perm.key] ? 'text-gray-700' : 'text-gray-400'}>
-                  {perm.label}
-                </span>
-              </div>
-            ))}
+            {PERMISSIONS_LIST.map((perm) => {
+              const allowed = getPermissionValue(employee.permissions, perm.key);
+              return (
+                <div key={perm.key} className="flex items-center gap-1.5 text-xs">
+                  <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${
+                    allowed ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'
+                  }`}>
+                    {allowed ? '✓' : '✕'}
+                  </span>
+                  <span className={allowed ? 'text-gray-700' : 'text-gray-400'}>
+                    {perm.label}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -594,5 +655,5 @@ function Row({ label, value, mono, bold, color }) {
         {value}
       </span>
     </div>
-  )
+  );
 }

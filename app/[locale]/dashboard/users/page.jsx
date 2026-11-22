@@ -8,7 +8,6 @@ import {
   Plus, Search, Users, Shield, UserCheck, UserX, Briefcase,
   Crown, Phone, Mail, Building2, MapPin, Calendar, User,
 } from 'lucide-react';
-import { formatDate } from '@/lib/utils';
 import Card from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
@@ -17,6 +16,8 @@ import ConfirmModal from '@/components/ui/ConfirmModal';
 import ActionButtons from '@/components/ui/ActionButtons';
 import toast from 'react-hot-toast';
 
+const ETHIOPIAN_TIME_ZONE = 'Africa/Addis_Ababa';
+
 const ROLE_ICONS = {
   admin:    Shield,
   owner:    Crown,
@@ -24,9 +25,34 @@ const ROLE_ICONS = {
   customer: User,
 };
 
+function formatEthiopianDate(input, options = {}) {
+  if (!input) return '-';
+  const date = input instanceof Date ? input : new Date(input);
+  if (Number.isNaN(date.getTime())) return String(input);
+
+  try {
+    return new Intl.DateTimeFormat('am-ET-u-ca-ethiopic', {
+      timeZone: ETHIOPIAN_TIME_ZONE,
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      ...options,
+    }).format(date);
+  } catch {
+    return date.toLocaleDateString('am-ET', {
+      timeZone: ETHIOPIAN_TIME_ZONE,
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      ...options,
+    });
+  }
+}
+
 export default function UsersPage() {
   const { user: currentUser } = useAuth();
   const [users, setUsers] = useState([]);
+  const [branches, setBranches] = useState([]);
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -37,12 +63,29 @@ export default function UsersPage() {
   const [deleting, setDeleting] = useState(false);
 
   const canManage = currentUser?.role === 'admin';
-  // Load users from API
+
+  // Load users and branches from API
   useEffect(() => {
     let cancelled = false;
     apiFetch('/users')
       .then((data) => { if (!cancelled) setUsers(Array.isArray(data) ? data : []); })
       .catch((err) => { if (!cancelled) toast.error(err.message); });
+
+    apiFetch('/branches')
+      .then((data) => {
+        if (!cancelled) {
+          const list = Array.isArray(data)
+            ? data
+            : Array.isArray(data?.branches)
+              ? data.branches
+              : [];
+          setBranches(list.length > 0 ? list : (USER_BRANCHES || []));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setBranches(USER_BRANCHES || []);
+      });
+
     return () => { cancelled = true; };
   }, []);
 
@@ -98,12 +141,22 @@ export default function UsersPage() {
 
   // Save
   const handleSave = (data) => {
+    const matchedBranch =
+      data.branch && typeof data.branch === 'string'
+        ? branches.find((b) => String(b._id || b.id) === String(data.branch)) || null
+        : data.branch;
+
+    const normalizedData = {
+      ...data,
+      branch: matchedBranch || null,
+    };
+
     if (editingUser) {
-      setUsers(users.map((u) => u._id === editingUser._id ? { ...u, ...data } : u));
+      setUsers(users.map((u) => u._id === editingUser._id ? { ...u, ...normalizedData } : u));
       toast.success('ተጠቃሚ ተስተካክሏል');
     } else {
       const newUser = {
-        ...data,
+        ...normalizedData,
         _id: 'u' + (users.length + 1),
         isActive: true,
         lastLogin: null,
@@ -217,10 +270,14 @@ export default function UsersPage() {
               ) : (
                 filtered.map((user) => {
                   const roleInfo = USER_ROLES[user.role] || {
-    label: user.role ? String(user.role).charAt(0).toUpperCase() + String(user.role).slice(1) : '—',
-    color: 'gray',
-  };
+                    label: user.role ? String(user.role).charAt(0).toUpperCase() + String(user.role).slice(1) : '—',
+                    color: 'gray',
+                  };
                   const RoleIcon = ROLE_ICONS?.[user.role] || User;
+                  const branchName =
+                    user.branch?.name ||
+                    branches.find((b) => String(b._id || b.id) === String(user.branch))?.name ||
+                    '-';
                   return (
                     <tr key={user._id} className="border-b border-gray-100 hover:bg-gray-50">
                       <td className="px-4 py-3">
@@ -249,7 +306,7 @@ export default function UsersPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-600">
-                        {user.branch?.name || '-'}
+                        {branchName}
                       </td>
                       <td className="px-4 py-3 text-center">
                         <button
@@ -266,7 +323,7 @@ export default function UsersPage() {
                         </button>
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-500">
-                        {user.lastLogin ? formatDate(user.lastLogin) : 'አልገባም'}
+                        {user.lastLogin ? formatEthiopianDate(user.lastLogin) : 'አልገባም'}
                       </td>
                       <td className="px-4 py-3">
                         <ActionButtons
@@ -295,6 +352,7 @@ export default function UsersPage() {
       >
         <UserForm
           user={editingUser}
+          branches={branches}
           onSave={handleSave}
           onCancel={() => { setShowModal(false); setEditingUser(null); }}
         />
@@ -306,7 +364,7 @@ export default function UsersPage() {
         onClose={() => setViewUser(null)}
         title="የተጠቃሚ ዝርዝር"
       >
-        {viewUser && <UserView user={viewUser} />}
+        {viewUser && <UserView user={viewUser} branches={branches} />}
       </Modal>
 
       {/* Delete Confirmation */}
@@ -345,7 +403,7 @@ function StatCard({ label, value, icon: Icon, color }) {
   );
 }
 
-function UserForm({ user, onSave, onCancel }) {
+function UserForm({ user, branches = [], onSave, onCancel }) {
   const isEdit = Boolean(user?._id);
 
   const [form, setForm] = useState({
@@ -353,7 +411,7 @@ function UserForm({ user, onSave, onCancel }) {
     phone: user?.phone || '',
     email: user?.email || '',
     role: user?.role || 'customer',
-    branch: user?.branch?._id || user?.branch || '',
+    branch: user?.branch?._id || user?.branch?.id || user?.branch || '',
     address: user?.address || '',
   });
   const [password, setPassword] = useState('');
@@ -446,7 +504,10 @@ function UserForm({ user, onSave, onCancel }) {
           <select name="branch" value={form.branch} onChange={onChange}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand text-sm">
             <option value="">— የለም —</option>
-            {USER_BRANCHES.map((b) => <option key={b._id} value={b._id}>{b.name}</option>)}
+            {branches.map((b) => {
+              const id = b._id || b.id;
+              return <option key={id} value={id}>{b.name}</option>;
+            })}
           </select>
         </FormField>
       </div>
@@ -519,12 +580,16 @@ function FormField({ label, children }) {
   );
 }
 
-function UserView({ user }) {
+function UserView({ user, branches = [] }) {
   const roleInfo = USER_ROLES[user.role] || {
     label: user.role ? String(user.role).charAt(0).toUpperCase() + String(user.role).slice(1) : '—',
     color: 'gray',
   };
   const RoleIcon = ROLE_ICONS?.[user.role] || User;
+  const branchName =
+    user.branch?.name ||
+    branches.find((b) => String(b._id || b.id) === String(user.branch))?.name ||
+    '-';
 
   return (
     <div>
@@ -553,10 +618,10 @@ function UserView({ user }) {
       <div className="space-y-3 pt-4 text-sm">
         <Row label="ስልክ" value={user.phone} icon={Phone} />
         <Row label="ኢሜይል" value={user.email || '-'} icon={Mail} />
-        <Row label="ቅርንጫፍ" value={user.branch?.name || '-'} icon={Building2} />
+        <Row label="ቅርንጫፍ" value={branchName} icon={Building2} />
         <Row label="አድራሻ" value={user.address || '-'} icon={MapPin} />
-        <Row label="ተፈጠረ" value={formatDate(user.createdAt)} icon={Calendar} />
-        <Row label="የመጨረሻ መግቢያ" value={user.lastLogin ? formatDate(user.lastLogin) : 'አልገባም'} icon={Calendar} />
+        <Row label="ተፈጠረ" value={formatEthiopianDate(user.createdAt)} icon={Calendar} />
+        <Row label="የመጨረሻ መግቢያ" value={user.lastLogin ? formatEthiopianDate(user.lastLogin) : 'አልገባም'} icon={Calendar} />
       </div>
     </div>
   );

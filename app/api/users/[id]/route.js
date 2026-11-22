@@ -93,7 +93,7 @@ export async function PATCH(req, ctx) {
     }
 
     const updated = await User.findByIdAndUpdate(id, updates, {
-      new: true,
+      returnDocument: 'after',
       runValidators: true,
     })
       .select('-password')

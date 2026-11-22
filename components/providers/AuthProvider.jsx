@@ -17,11 +17,18 @@ export function AuthProvider({ children }) {
       setLoading(false);
       return;
     }
+
+    let cancelled = false;
+
+    const clearStorage = () => {
+      localStorage.removeItem('user');
+      localStorage.removeItem('token');
+    };
+
     try {
       const cached = localStorage.getItem('user');
       if (!cached || cached === 'undefined' || cached === 'null') {
-        localStorage.removeItem('user');
-        localStorage.removeItem('token');
+        clearStorage();
       } else {
         const parsed = JSON.parse(cached);
         if (parsed && typeof parsed === 'object' && parsed._id) {
@@ -32,10 +39,29 @@ export function AuthProvider({ children }) {
       }
     } catch (err) {
       console.warn('[AuthProvider] bad cached user, clearing:', err.message);
-      localStorage.removeItem('user');
-      localStorage.removeItem('token');
+      clearStorage();
     }
-    setLoading(false);
+
+    // Optional background refresh if /api/auth/me exists and cookie is valid
+    apiFetch('/auth/me')
+      .then((me) => {
+        if (cancelled) return;
+        const resolvedUser = me?.user || (me?._id ? me : null);
+        if (resolvedUser && resolvedUser._id) {
+          setUser(resolvedUser);
+          localStorage.setItem('user', JSON.stringify(resolvedUser));
+        }
+      })
+      .catch(() => {
+        // Ignore if /auth/me isn't used or session is unauthenticated
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const updateUser = (patch) => {
@@ -49,11 +75,15 @@ export function AuthProvider({ children }) {
     });
   };
 
-  const login = async (email, password) => {
+  const login = async (email, password, rememberMe = true) => {
     const normalizedEmail = String(email || '').trim().toLowerCase();
     const data = await apiFetch('/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ email: normalizedEmail, password }),
+      body: JSON.stringify({
+        email: normalizedEmail,
+        password,
+        rememberMe: Boolean(rememberMe),
+      }),
     });
 
     if (!data || !data.user || !data.token) {

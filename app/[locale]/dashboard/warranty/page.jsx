@@ -312,7 +312,8 @@ export default function WarrantyPage() {
   const isOwner    = OWNER_ROLES.includes(user?.role);
   const isSeller   = user?.role === 'seller';
   const isCustomer = user?.role === 'customer';
-  const canManage  = user?.role === 'admin' || isSeller || isOwner;
+  const isCashier  = user?.role === 'cashier';
+  const canManage  = user?.role === 'admin' || isSeller || isOwner || isCashier;
   const canView    = ['owner', 'admin', 'seller', 'cashier', 'storekeeper', 'customer'].includes(user?.role);
 
   const userBranchId = useMemo(() => {
@@ -376,7 +377,7 @@ export default function WarrantyPage() {
         return String(phone) === String(user?.phone || '');
       });
     }
-    if (isSeller && userBranchId) {
+    if ((isSeller || isCashier) && userBranchId) {
       return warranties.filter((w) => {
         const order = orderMap.get(String(w.order?._id ?? w.order ?? ''));
         const bid = order?.branch?._id ?? order?.branch ?? w.branch?._id ?? w.branch;

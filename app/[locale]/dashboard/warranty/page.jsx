@@ -851,7 +851,7 @@ export default function WarrantyPage() {
       {!isCustomer && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard label="ጠቅላላ ዋስትናዎች" value={stats.total}    icon={ShieldCheck}   color="bg-blue-500" />
-          <StatCard label="በስራ ላይ"        value={stats.active}   icon={CheckCircle2}  color="bg-green-500" />
+          <StatCard label="በስራ ላይ"        value={stats.active}      icon={CheckCircle2}  color="bg-green-500" />
           <StatCard label="የሚያልቁ"         value={stats.expiring} icon={AlertTriangle} color="bg-yellow-500" />
           <StatCard label="አልቀው"         value={stats.expired}  icon={XCircle}       color="bg-red-500" />
         </div>
@@ -872,126 +872,88 @@ export default function WarrantyPage() {
           <div>
             <label className="text-xs text-gray-500 mb-1 block">ሁኔታ</label>
             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand focus:outline-none bg-white">
-              <option value="all">ሁሉም</option>
+              className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white focus:border-brand focus:outline-none">
+              <option value="all">ሁሉም ሁኔታዎች</option>
               {Object.entries(WARRANTY_STATUS).map(([k, v]) => (
                 <option key={k} value={k}>{v.label}</option>
               ))}
             </select>
           </div>
-          {!isSeller && !isCustomer && (
-            <div>
-              <label className="text-xs text-gray-500 mb-1 block">ቅርንጫፍ</label>
-              <select value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand focus:outline-none bg-white">
-                <option value="all">ሁሉም</option>
-                {branches.map((b) => <option key={b._id} value={b._id}>{b.name}</option>)}
-              </select>
-            </div>
-          )}
+          <div>
+            <label className="text-xs text-gray-500 mb-1 block">ቅርንጫፍ</label>
+            <select value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white focus:border-brand focus:outline-none">
+              <option value="all">ሁሉም ቅርንጫፎች</option>
+              {branches.map((b) => (
+                <option key={b._id} value={b._id}>{b.name}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </Card>
-
-      {error && (
-        <Card padding="md">
-          <div className="flex items-start gap-3 text-red-600">
-            <AlertCircle size={20} className="flex-shrink-0 mt-0.5" />
-            <div className="flex-1">
-              <p className="text-sm font-medium">ውሂብ ማምጣት አልተቻለም</p>
-              <p className="text-xs text-red-500 mt-0.5">{error}</p>
-            </div>
-          </div>
-        </Card>
-      )}
 
       {/* Table */}
       <Card padding="none">
         {loading ? (
-          <div className="py-16 text-center text-sm text-gray-400">በመጫን ላይ…</div>
-        ) : filtered.length === 0 ? (
-          <div className="py-16 text-center">
-            <div className="w-14 h-14 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-3">
-              <ShieldCheck size={26} className="text-gray-400" />
-            </div>
-            <p className="text-sm font-medium text-gray-700">
-              {isCustomer ? 'የእርስዎ ዋስትና የለም' : 'ምንም ዋስትና አልተገኘም'}
-            </p>
-            {canManage && (
-              <Button className="mt-3" onClick={() => { setEditingItem(null); setShowModal(true); }}>
-                <Plus size={14} /> የመጀመሪያውን ዋስትና ይመዝግቡ
-              </Button>
-            )}
+          <div className="p-8 text-center text-gray-500">በመጫን ላይ…</div>
+        ) : error ? (
+          <div className="p-8 text-center text-red-600 flex items-center justify-center gap-2">
+            <AlertCircle size={18} /> {error}
           </div>
+        ) : filtered.length === 0 ? (
+          <div className="p-8 text-center text-gray-500">ምንም ዋስትና አልተገኘም</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr className="text-left text-xs text-gray-500">
-                  <th className="px-4 py-3 font-medium">ኮድ</th>
-                  <th className="px-4 py-3 font-medium">ምርት</th>
-                  {!isCustomer && <th className="px-4 py-3 font-medium">ደንበኛ</th>}
-                  <th className="px-4 py-3 font-medium">የጀመረበት</th>
-                  <th className="px-4 py-3 font-medium">የሚያልቅበት</th>
-                  <th className="px-4 py-3 font-medium text-center">የቀረ ቀን</th>
-                  <th className="px-4 py-3 font-medium">ሁኔታ</th>
-                  {canManage && <th className="px-4 py-3 font-medium text-center">ተግባር</th>}
+              <thead className="bg-gray-50 border-b border-gray-200 text-gray-600 text-xs">
+                <tr>
+                  <th className="py-3 px-4 text-left font-semibold">ኮድ</th>
+                  <th className="py-3 px-4 text-left font-semibold">ምርት</th>
+                  <th className="py-3 px-4 text-left font-semibold">ደንበኛ</th>
+                  <th className="py-3 px-4 text-left font-semibold">የጀመረበት</th>
+                  <th className="py-3 px-4 text-left font-semibold">የሚያልቅበት</th>
+                  <th className="py-3 px-4 text-left font-semibold">የቀረ ቀን</th>
+                  <th className="py-3 px-4 text-left font-semibold">ሁኔታ</th>
+                  <th className="py-3 px-4 text-center font-semibold">ተግባር</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {filtered.map((w) => (
-                  <tr key={w._id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 font-mono text-xs text-brand font-medium">{w._code}</td>
-                    <td className="px-4 py-3">
-                      <p className="font-medium text-gray-800 truncate max-w-xs">{w._productName}</p>
-                      <p className="text-[10px] text-gray-400">{w._category}</p>
+                  <tr key={w._id} className="hover:bg-gray-50/70 transition">
+                    <td className="py-3 px-4 font-mono text-xs font-semibold text-gray-800 whitespace-nowrap">
+                      {w._code}
                     </td>
-                    {!isCustomer && (
-                      <td className="px-4 py-3">
-                        <p className="text-gray-800">{w._customerName}</p>
-                        <p className="text-xs text-gray-500">{w._customerPhone}</p>
-                      </td>
-                    )}
-                    <td className="px-4 py-3 text-gray-600 text-xs">
-                      {formatEthiopianDate(w._startDate)}
-                    </td>
-                    <td className="px-4 py-3 text-gray-600 text-xs">
-                      {formatEthiopianDate(w._endDate)}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      {w._daysLeft === null ? (
-                        <span className="text-xs text-gray-400">—</span>
-                      ) : w._daysLeft < 0 ? (
-                        <span className="text-xs font-semibold text-red-600">{Math.abs(w._daysLeft)} ቀን አልፏል</span>
-                      ) : w._daysLeft <= 30 ? (
-                        <span className="text-xs font-semibold text-yellow-600">{w._daysLeft} ቀን</span>
-                      ) : (
-                        <span className="text-xs font-semibold text-green-600">{w._daysLeft} ቀን</span>
+                    <td className="py-3 px-4">
+                      <div className="font-medium text-gray-800">{w._productName}</div>
+                      {w._category && w._category !== '—' && (
+                        <div className="text-xs text-gray-500">{w._category}</div>
                       )}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="py-3 px-4">
+                      <div className="font-medium text-gray-800">{w._customerName}</div>
+                      <div className="text-xs text-gray-500">{w._customerPhone}</div>
+                    </td>
+                    <td className="py-3 px-4 text-gray-700 whitespace-nowrap">
+                      {formatEthiopianDate(w._startDate)}
+                    </td>
+                    <td className="py-3 px-4 text-gray-700 whitespace-nowrap">
+                      {formatEthiopianDate(w._endDate)}
+                    </td>
+                    <td className="py-3 px-4 whitespace-nowrap font-medium text-gray-800">
+                      {w._daysLeft != null ? ${w._daysLeft} ቀን : '—'}
+                    </td>
+                    <td className="py-3 px-4 whitespace-nowrap">
                       <Badge color={w._statusColor}>{w._statusLabel}</Badge>
                     </td>
-                    {canManage && (
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1 justify-center">
-                          <button
-                            type="button"
-                            onClick={() => downloadSinglePdf(w)}
-                            className="p-1.5 rounded text-red-600 hover:bg-red-50 transition"
-                            title="የዋስትና ሰርተፊኬት አውርድ"
-                          >
-                            <FileDown size={14} />
-                          </button>
-                          <ActionButtons
-                            onView={() => setViewItem(w)}
-                            onEdit={() => { setEditingItem(w); setShowModal(true); }}
-                            onDelete={() => setDeleteTarget(w)}
-                            canEdit={true}
-                            canDelete={true}
-                          />
-                        </div>
-                      </td>
-                    )}
+                    <td className="py-3 px-4">
+                      <ActionButtons
+                        onView={() => setViewItem(w)}
+                        onEdit={() => { setEditingItem(w); setShowModal(true); }}
+                        onDelete={() => setDeleteTarget(w)}
+                        canEdit={canManage}
+                        canDelete={canManage}
+                      />
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -1000,40 +962,84 @@ export default function WarrantyPage() {
         )}
       </Card>
 
-      {/* Create / Edit modal */}
+      {/* View Modal */}
+      <Modal
+        isOpen={Boolean(viewItem)}
+        onClose={() => setViewItem(null)}
+        title={viewItem ? የዋስትና ዝርዝር —  : 'የዋስትና ዝርዝር'}
+      >
+        {viewItem && (
+          <div className="space-y-3 text-sm">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <span className="text-xs text-gray-500 block">ኮድ</span>
+                <span className="font-mono font-semibold text-gray-800">{viewItem._code}</span>
+              </div>
+              <div>
+                <span className="text-xs text-gray-500 block">ሁኔታ</span>
+                <Badge color={viewItem._statusColor}>{viewItem._statusLabel}</Badge>
+              </div>
+              <div>
+                <span className="text-xs text-gray-500 block">ምርት</span>
+                <span className="font-medium text-gray-800">{viewItem._productName}</span>
+              </div>
+              <div>
+                <span className="text-xs text-gray-500 block">ቅርንጫፍ</span>
+                <span className="font-medium text-gray-800">{viewItem._branch}</span>
+              </div>
+              <div>
+                <span className="text-xs text-gray-500 block">ደንበኛ</span>
+                <span className="font-medium text-gray-800">{viewItem._customerName}</span>
+              </div>
+              <div>
+                <span className="text-xs text-gray-500 block">ስልክ</span>
+                <span className="font-medium text-gray-800">{viewItem._customerPhone}</span>
+              </div>
+              <div>
+                <span className="text-xs text-gray-500 block">የጀመረበት</span>
+                <span className="font-medium text-gray-800">{formatEthiopianDate(viewItem._startDate)}</span>
+              </div>
+              <div>
+                <span className="text-xs text-gray-500 block">የሚያልቅበት</span>
+                <span className="font-medium text-gray-800">{formatEthiopianDate(viewItem._endDate)}</span>
+              </div>
+            </div>
+            <div className="pt-3 border-t border-gray-100 flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => downloadSinglePdf(viewItem)}>ሰርተፊኬት</Button>
+              <Button variant="secondary" onClick={() => setViewItem(null)}>ዝጋ</Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Create / Edit Modal */}
       <Modal
         isOpen={showModal}
         onClose={() => { setShowModal(false); setEditingItem(null); }}
-        title={editingItem ? 'ዋስትና አስተካክል' : 'አዲስ ዋስትና መዝግብ'}
-        size="lg"
+        title={editingItem ? 'ዋስትና አስተካክል' : 'አዲስ ዋስትና'}
       >
         <WarrantyForm
-          item={editingItem}
-          orders={orders}
+          initialData={editingItem}
           products={products}
+          orders={orders}
           branches={branches}
-          userBranchId={userBranchId}
-          isSeller={isSeller}
-          onSave={handleSave}
+          onSubmit={handleSave}
           onCancel={() => { setShowModal(false); setEditingItem(null); }}
         />
       </Modal>
 
-      <Modal isOpen={!!viewItem} onClose={() => setViewItem(null)} title="የዋስትና ዝርዝር">
-        {viewItem && <WarrantyView item={viewItem} onDownload={() => downloadSinglePdf(viewItem)} />}
-      </Modal>
-
+      {/* Delete Confirm Modal */}
       <ConfirmModal
-        isOpen={!!deleteTarget}
+        isOpen={Boolean(deleteTarget)}
         onClose={() => setDeleteTarget(null)}
         onConfirm={handleDeleteConfirm}
+        loading={deleting}
         title="ዋስትና ይሰረዝ?"
-        message="ይህ የዋስትና መዝገብ በቋሚነት ይሰረዛል።"
-        itemName={deleteTarget?._productName}
-        itemType={deleteTarget?._code}
+        message="ይህን ዋስትና መሰረዝ ይፈልጋሉ?"
+        itemName={deleteTarget?._customerName}
+        itemType={(deleteTarget?._code || '') + ' · ' + (deleteTarget?._productName || '')}
         confirmLabel="አዎ፣ ሰርዝ"
         cancelLabel="ተወው"
-        loading={deleting}
         variant="danger"
       />
     </div>
@@ -1042,183 +1048,159 @@ export default function WarrantyPage() {
 
 function StatCard({ label, value, icon: Icon, color }) {
   return (
-    <Card padding="sm">
+    <Card padding="md">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-xs text-gray-500">{label}</p>
-          <p className="text-xl font-bold text-gray-800 mt-1">{value}</p>
+          <div className="text-xs text-gray-500">{label}</div>
+          <div className="text-2xl font-bold text-gray-800 mt-1">{value}</div>
         </div>
-        <div className={'p-2.5 rounded-lg ' + color}>
-          <Icon size={20} className="text-white" />
+        <div className={w-10 h-10 rounded-lg  text-white flex items-center justify-center}>
+          <Icon size={20} />
         </div>
       </div>
     </Card>
   );
 }
 
-function WarrantyForm({ item, orders, products, branches, userBranchId, isSeller, onSave, onCancel }) {
-  const defaultBranch = isSeller && userBranchId
-    ? userBranchId
-    : (item?.branch?._id || item?.branch || item?.order?.branch?._id || item?.order?.branch || '');
+function WarrantyForm({ initialData, products, orders, branches, onSubmit, onCancel }) {
+  const [form, setForm] = useState(() => ({
+    warrantyNumber: initialData?.warrantyNumber || '',
+    product: initialData?.product?._id ?? initialData?.product ?? '',
+    order: initialData?.order?._id ?? initialData?.order ?? '',
+    branch: initialData?.branch?._id ?? initialData?.branch ?? '',
+    customerName: initialData?.customerName || '',
+    customerPhone: initialData?.customerPhone || '',
+    durationMonths: initialData?.durationMonths || DEFAULT_WARRANTY_MONTHS,
+    startDate: initialData?.startDate
+      ? toIsoDateFromUtc(new Date(initialData.startDate))
+      : toIsoDateFromUtc(new Date()),
+    status: initialData?.status || 'active',
+    notes: initialData?.notes || '',
+  }));
+  const [submitting, setSubmitting] = useState(false);
 
-  const [form, setForm] = useState({
-    warrantyNumber: item?.warrantyNumber || '',
-    customerName: item?.customerName || item?.order?.customerName || '',
-    customerPhone: item?.customerPhone || item?.order?.customerPhone || '',
-    itemType: item?.itemType || item?.product?.name || item?.order?.itemType || '',
-    startDate: item?.startDate
-      ? new Date(item.startDate).toISOString().split('T')[0]
-      : new Date().toISOString().split('T')[0],
-    endDate: item?.endDate
-      ? new Date(item.endDate).toISOString().split('T')[0]
-      : '',
-    durationMonths: item?.durationMonths || DEFAULT_WARRANTY_MONTHS,
-    price: item?.price ?? item?.purchasePrice ?? item?.order?.totalPrice ?? '',
-    status: item?.status || 'active',
-    branch: defaultBranch,
-    order: item?.order?._id || item?.order || '',
-    product: item?.product?._id || item?.product || '',
-  });
-
-  const onChange = (e) => {
-    const { name, value } = e.target;
-    setForm((prev) => ({
-      ...prev,
-      [name]: ['durationMonths'].includes(name) ? Number(value) : value,
-    }));
-  };
-
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    onSave({
-      warrantyNumber: form.warrantyNumber || undefined,
-      customerName: form.customerName || undefined,
-      customerPhone: form.customerPhone || undefined,
-      itemType: form.itemType || undefined,
-      startDate: form.startDate || undefined,
-      endDate: form.endDate || undefined,
-      durationMonths: Number(form.durationMonths) || DEFAULT_WARRANTY_MONTHS,
-      price: form.price !== '' ? Number(form.price) : undefined,
-      status: form.status,
-      branch: form.branch || undefined,
-      order: form.order || undefined,
-      product: form.product || undefined,
-    });
+    setSubmitting(true);
+    try {
+      const payload = {
+        ...form,
+        durationMonths: Number(form.durationMonths) || DEFAULT_WARRANTY_MONTHS,
+        product: form.product || undefined,
+        order: form.order || undefined,
+        branch: form.branch || undefined,
+      };
+      await onSubmit(payload);
+    } finally {
+      setSubmitting(false);
+    }
   };
-
-  const inputClass =
-    'w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-800 bg-white focus:border-brand focus:outline-none';
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+    <form onSubmit={handleSubmit} className="space-y-4 text-sm">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
-          <label className="text-xs font-medium text-gray-600 mb-1 block">የዋስትና ቁጥር</label>
-          <input name="warrantyNumber" value={form.warrantyNumber} onChange={onChange} className={inputClass} />
-        </div>
-        <div>
-          <label className="text-xs font-medium text-gray-600 mb-1 block">የዕቃው አይነት *</label>
-          <input name="itemType" value={form.itemType} onChange={onChange} required className={inputClass} />
-        </div>
-        <div>
-          <label className="text-xs font-medium text-gray-600 mb-1 block">የገዢው ስም</label>
-          <input name="customerName" value={form.customerName} onChange={onChange} className={inputClass} />
-        </div>
-        <div>
-          <label className="text-xs font-medium text-gray-600 mb-1 block">ስልክ</label>
-          <input name="customerPhone" value={form.customerPhone} onChange={onChange} className={inputClass} />
-        </div>
-        <div>
-          <label className="text-xs font-medium text-gray-600 mb-1 block">የተገዛበት ቀን *</label>
-          <EthiopianDateInput
-            value={form.startDate}
-            onChange={(val) => setForm((prev) => ({ ...prev, startDate: val }))}
-            required
+          <label className="text-xs text-gray-500 mb-1 block">የዋስትና ቁጥር</label>
+          <input
+            type="text"
+            value={form.warrantyNumber}
+            onChange={(e) => setForm((f) => ({ ...f, warrantyNumber: e.target.value }))}
+            placeholder="WRN-2026-0001"
+            className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:border-brand focus:outline-none"
           />
         </div>
         <div>
-          <label className="text-xs font-medium text-gray-600 mb-1 block">የሚያልቅበት ቀን</label>
-          <EthiopianDateInput
-            value={form.endDate}
-            onChange={(val) => setForm((prev) => ({ ...prev, endDate: val }))}
-          />
-        </div>
-        <div>
-          <label className="text-xs font-medium text-gray-600 mb-1 block">የዋስትና ጊዜ (ወራት)</label>
-          <input type="number" name="durationMonths" value={form.durationMonths} onChange={onChange} min={1} className={inputClass} />
-        </div>
-        <div>
-          <label className="text-xs font-medium text-gray-600 mb-1 block">የተገዛበት ዋጋ</label>
-          <input type="number" name="price" value={form.price} onChange={onChange} min={0} className={inputClass} />
-        </div>
-        <div>
-          <label className="text-xs font-medium text-gray-600 mb-1 block">ሁኔታ</label>
-          <select name="status" value={form.status} onChange={onChange} className={inputClass}>
+          <label className="text-xs text-gray-500 mb-1 block">ሁኔታ</label>
+          <select
+            value={form.status}
+            onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))}
+            className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white focus:border-brand focus:outline-none"
+          >
             {Object.entries(WARRANTY_STATUS).map(([k, v]) => (
               <option key={k} value={k}>{v.label}</option>
             ))}
           </select>
         </div>
         <div>
-          <label className="text-xs font-medium text-gray-600 mb-1 block">ቅርንጫፍ</label>
-          {isSeller ? (
-            <div className="w-full px-3 py-2 rounded-lg bg-blue-50 text-blue-700 text-sm font-medium">
-              {branches.find((b) => String(b._id) === String(userBranchId))?.name || 'ቅርንጫፍ'}
-            </div>
-          ) : (
-            <select name="branch" value={form.branch} onChange={onChange} className={inputClass}>
-              <option value="">— ይምረጡ —</option>
-              {branches.map((b) => <option key={b._id} value={b._id}>{b.name}</option>)}
-            </select>
-          )}
+          <label className="text-xs text-gray-500 mb-1 block">ምርት</label>
+          <select
+            value={form.product}
+            onChange={(e) => setForm((f) => ({ ...f, product: e.target.value }))}
+            className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white focus:border-brand focus:outline-none"
+          >
+            <option value="">ምርት ይምረጡ</option>
+            {products.map((p) => (
+              <option key={p._id} value={p._id}>{p.name}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 mb-1 block">ቅርንጫፍ</label>
+          <select
+            value={form.branch}
+            onChange={(e) => setForm((f) => ({ ...f, branch: e.target.value }))}
+            className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white focus:border-brand focus:outline-none"
+          >
+            <option value="">ቅርንጫፍ ይምረጡ</option>
+            {branches.map((b) => (
+              <option key={b._id} value={b._id}>{b.name}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 mb-1 block">የደንበኛ ስም</label>
+          <input
+            type="text"
+            value={form.customerName}
+            onChange={(e) => setForm((f) => ({ ...f, customerName: e.target.value }))}
+            className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:border-brand focus:outline-none"
+          />
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 mb-1 block">ስልክ ቁጥር</label>
+          <input
+            type="text"
+            value={form.customerPhone}
+            onChange={(e) => setForm((f) => ({ ...f, customerPhone: e.target.value }))}
+            className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:border-brand focus:outline-none"
+          />
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 mb-1 block">የጀመረበት ቀን</label>
+          <EthiopianDateInput
+            value={form.startDate}
+            onChange={(iso) => setForm((f) => ({ ...f, startDate: iso }))}
+            required
+          />
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 mb-1 block">የዋስትና ጊዜ (ወራት)</label>
+          <input
+            type="number"
+            min="1"
+            value={form.durationMonths}
+            onChange={(e) => setForm((f) => ({ ...f, durationMonths: e.target.value }))}
+            className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:border-brand focus:outline-none"
+          />
         </div>
       </div>
 
-      <div className="flex gap-2 pt-3 border-t border-gray-100">
-        <button type="button" onClick={onCancel}
-          className="flex-1 px-4 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 transition">
-          ሰርዝ
-        </button>
-        <button type="submit"
-          className="flex-1 px-4 py-2 rounded-lg bg-brand text-white font-semibold hover:bg-brand-dark transition">
-          {item ? 'አስተካክል' : 'መዝግብ'}
-        </button>
+      <div>
+        <label className="text-xs text-gray-500 mb-1 block">ማስታወሻ</label>
+        <textarea
+          rows={2}
+          value={form.notes}
+          onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+          className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:border-brand focus:outline-none"
+        />
+      </div>
+
+      <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
+        <Button type="button" variant="secondary" onClick={onCancel}>ሰርዝ</Button>
+        <Button type="submit" disabled={submitting}>
+          {submitting ? 'በማስቀመጥ ላይ…' : 'አስቀምጥ'}
+        </Button>
       </div>
     </form>
-  );
-}
-
-function WarrantyView({ item, onDownload }) {
-  return (
-    <div className="space-y-4 text-sm">
-      <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-        <div>
-          <p className="text-xs text-gray-500">የዋስትና ኮድ</p>
-          <p className="font-mono font-bold text-brand">{item._code}</p>
-        </div>
-        <Badge color={item._statusColor}>{item._statusLabel}</Badge>
-      </div>
-
-      <div className="space-y-2">
-        <div className="flex justify-between"><span className="text-gray-500">ምርት:</span><span className="font-medium text-gray-800">{item._productName}</span></div>
-        <div className="flex justify-between"><span className="text-gray-500">ደንበኛ:</span><span className="font-medium text-gray-800">{item._customerName}</span></div>
-        <div className="flex justify-between"><span className="text-gray-500">ስልክ:</span><span className="font-medium text-gray-800">{item._customerPhone}</span></div>
-        <div className="flex justify-between"><span className="text-gray-500">ቅርንጫፍ:</span><span className="font-medium text-gray-800">{item._branch}</span></div>
-        <div className="flex justify-between"><span className="text-gray-500">የተገዛበት ቀን:</span><span className="font-medium text-gray-800">{formatEthiopianDate(item._startDate)}</span></div>
-        <div className="flex justify-between"><span className="text-gray-500">የሚያልቅበት ቀን:</span><span className="font-medium text-gray-800">{formatEthiopianDate(item._endDate)}</span></div>
-        <div className="flex justify-between"><span className="text-gray-500">የዋስትና ጊዜ:</span><span className="font-medium text-gray-800">{item._durationMonths} ወራት</span></div>
-        {item._price != null && (
-          <div className="flex justify-between"><span className="text-gray-500">የተገዛበት ዋጋ:</span><span className="font-medium text-gray-800">{formatETB(item._price)}</span></div>
-        )}
-      </div>
-
-      <button
-        type="button"
-        onClick={onDownload}
-        className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-brand text-white font-semibold hover:bg-brand-dark transition"
-      >
-        <FileDown size={16} /> የዋስትና ሰርተፊኬት አውርድ
-      </button>
-    </div>
   );
 }

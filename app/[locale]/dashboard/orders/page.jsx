@@ -280,6 +280,8 @@ const NEXT_STATUS = {
   ready:          'picked_up',
 };
 
+const STAFF_ROLES = ['seller', 'cashier', 'storekeeper'];
+
 export default function OrdersPage() {
   const { user } = useAuth();
 
@@ -297,7 +299,12 @@ export default function OrdersPage() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
-  const canManage = user?.role === 'admin' || user?.role === 'seller';
+  const isAdminActor = user?.role === 'admin' || user?.role === 'owner';
+  const isStaffActor = STAFF_ROLES.includes(user?.role);
+  const canManage = isAdminActor || isStaffActor;
+  const userBranchId = user?.branch
+    ? String(typeof user.branch === 'object' ? user.branch._id : user.branch)
+    : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -318,15 +325,14 @@ export default function OrdersPage() {
 
   const roleFiltered = useMemo(() => {
     let result = orders;
-    if (user?.role === 'seller' && user?.branch) {
-      const branchId = typeof user.branch === 'object' ? user.branch._id : user.branch;
-      result = result.filter((o) => (o.branch?._id || o.branch) === branchId);
+    if (isStaffActor && userBranchId) {
+      result = result.filter((o) => String(o.branch?._id || o.branch) === userBranchId);
     }
     if (user?.role === 'customer') {
       result = result.filter((o) => o.customerPhone === user.phone);
     }
     return result;
-  }, [orders, user]);
+  }, [orders, user, isStaffActor, userBranchId]);
 
   const filtered = useMemo(() => {
     return roleFiltered.filter((o) => {
@@ -352,6 +358,17 @@ export default function OrdersPage() {
     const totalRemaining = roleFiltered.reduce((s, o) => s + (o.remainingPayment || 0), 0);
     return { total, pending, inProduction, ready, totalRevenue, totalRemaining };
   }, [roleFiltered]);
+
+  const canActorModifyOrder = (order) => {
+    if (!order) return canManage;
+    if (isAdminActor) return true;
+    if (!isStaffActor) return false;
+    const orderBranchId = order.branch?._id ? String(order.branch._id) : order.branch ? String(order.branch) : null;
+    if (userBranchId && orderBranchId) {
+      return orderBranchId === userBranchId;
+    }
+    return true;
+  };
 
   const handleDeleteClick = (order) => setDeleteTarget(order);
 
@@ -464,7 +481,7 @@ export default function OrdersPage() {
           <p className="text-sm text-gray-500 mt-1">
             {filtered.length} ትዕዛዞች · {formatETB(stats.totalRevenue)} ጠቅላላ ዋጋ · <span className="text-orange-600 font-medium">{formatETB(stats.totalRemaining)} ቀሪ</span>
           </p>
-          {user?.role === 'seller' && user?.branch && (
+          {isStaffActor && user?.branch && (
             <p className="text-xs text-brand font-medium mt-1 flex items-center gap-1">
               <Building2 size={12} />
               {typeof user.branch === 'object' ? user.branch.name : 'ቅርንጫፍ'}
@@ -508,7 +525,7 @@ export default function OrdersPage() {
             ))}
           </select>
 
-          {user?.role === 'admin' ? (
+          {isAdminActor ? (
             <select
               value={branchFilter}
               onChange={(e) => setBranchFilter(e.target.value)}
@@ -560,6 +577,7 @@ export default function OrdersPage() {
               ) : (
                 filtered.map((order) => {
                   const status = ORDER_STATUS[order.status] || { label: order.status, color: 'gray' };
+                  const rowCanModify = canActorModifyOrder(order);
                   return (
                     <tr key={order._id} className="border-b border-gray-100 hover:bg-gray-50">
                       <td className="px-4 py-3 font-mono text-xs text-brand font-medium">{order.orderNumber}</td>
@@ -596,8 +614,8 @@ export default function OrdersPage() {
                           onView={() => setViewOrder(order)}
                           onEdit={() => { setEditingOrder(order); setShowModal(true); }}
                           onDelete={() => handleDeleteClick(order)}
-                          canEdit={canManage}
-                          canDelete={canManage}
+                          canEdit={rowCanModify}
+                          canDelete={rowCanModify}
                         />
                       </td>
                     </tr>
@@ -634,7 +652,7 @@ export default function OrdersPage() {
             order={viewOrder}
             onAdvanceStatus={() => handleAdvanceStatus(viewOrder)}
             onAddPayment={(amt) => handleAddPayment(viewOrder, amt)}
-            canManage={canManage}
+            canManage={canActorModifyOrder(viewOrder)}
           />
         )}
       </Modal>
@@ -742,9 +760,9 @@ function RemainingCell({ order, onAdd }) {
 // Order form — with MANDATORY prepayment, minimum 1000 ETB
 // ============================================================
 function OrderForm({ order, branches, onSave, onCancel, currentUser }) {
-  const isSeller = currentUser?.role === 'seller';
+  const isStaff = STAFF_ROLES.includes(currentUser?.role);
 
-  const sellerBranch = isSeller && currentUser?.branch
+  const staffBranch = isStaff && currentUser?.branch
     ? (typeof currentUser.branch === 'object' ? currentUser.branch._id : currentUser.branch)
     : '';
 
@@ -764,7 +782,7 @@ function OrderForm({ order, branches, onSave, onCancel, currentUser }) {
       ? new Date(order.appointmentDate).toISOString().split('T')[0]
       : '',
     note: order?.note || '',
-    branch: order?.branch?._id || order?.branch || sellerBranch,
+    branch: order?.branch?._id || order?.branch || staffBranch,
     measurements: order?.measurements || { width: '', height: '', depth: '', unit: 'cm' },
   });
 
@@ -874,163 +892,270 @@ function OrderForm({ order, branches, onSave, onCancel, currentUser }) {
               placeholder="የዕቃ ዓይነት ያስገቡ..."
               className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800"
             />
-            {Array.isArray(ORDER_ITEM_TYPES) && ORDER_ITEM_TYPES.length > 0 && (
-              <datalist id="order-item-types">
-                {ORDER_ITEM_TYPES.map((t) => <option key={t} value={t} />)}
-              </datalist>
-            )}
-          </FormField>
-          <FormField label="ብዛት *">
-            <input type="number" name="quantity" value={form.quantity} onChange={onChange} required min={1}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
-            />
-          </FormField>
-          <FormField label="የአንድ ዋጋ (ETB) *">
-            <input type="number" name="unitPrice" value={form.unitPrice} onChange={onChange} required min={0}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
-            />
-          </FormField>
-          <FormField label="የትዕዛዝ ቀን *">
-            <EthiopianDateInput
-              value={form.orderDate}
-              onChange={(val) => setForm({ ...form, orderDate: val })}
-              required
-            />
-          </FormField>
-          <FormField label="ቀጠሮ ቀን *">
-            <EthiopianDateInput
-              value={form.appointmentDate}
-              onChange={(val) => setForm({ ...form, appointmentDate: val })}
-              required
-            />
-          </FormField>
-
-          <FormField label="ቅርንጫፍ *">
-            {isSeller ? (
-              <div className="w-full px-3 py-2 rounded-lg bg-blue-50 text-blue-700 text-sm font-medium">
-                {typeof currentUser.branch === 'object' ? currentUser.branch?.name : 'ቅርንጫፍ'}
-              </div>
-            ) : (
-              <select name="branch" value={form.branch} onChange={onChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800">
-                <option value="">— ይምረጡ —</option>
-                {branches.length === 0 ? (
-                  <option value="" disabled>ቅርንጫፍ በመጫን ላይ...</option>
-                ) : (
-                  branches.map((b) => <option key={b._id} value={b._id}>{b.name}</option>)
-                )}
-              </select>
-            )}
+            <datalist id="order-item-types">
+              {ORDER_ITEM_TYPES.map((t) => (
+                <option key={t} value={t} />
+              ))}
+            </datalist>
           </FormField>
 
           <FormField label="ሁኔታ">
-            <select name="status" value={form.status} onChange={onChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800">
+            <select
+              name="status"
+              value={form.status}
+              onChange={onChange}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800"
+            >
               {Object.entries(ORDER_STATUS).map(([k, v]) => (
                 <option key={k} value={k}>{v.label || v}</option>
               ))}
             </select>
+          </FormField>
+
+          <FormField label="ብዛት *">
+            <input
+              type="number"
+              name="quantity"
+              value={form.quantity}
+              onChange={onChange}
+              required
+              min={1}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800"
+            />
+          </FormField>
+
+          <FormField label="የአንዱ ዋጋ (ETB) *">
+            <input
+              type="number"
+              name="unitPrice"
+              value={form.unitPrice}
+              onChange={onChange}
+              required
+              min={0}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800"
+            />
+          </FormField>
+
+          <FormField label={`ቅድመ ክፍያ (ETB) * (ቢያንስ ${formatETB(MIN_PREPAYMENT)})`}>
+            <input
+              type="number"
+              name="prepayment"
+              value={form.prepayment}
+              onChange={onChange}
+              required
+              min={MIN_PREPAYMENT}
+              max={totalPrice || undefined}
+              className={`w-full px-3 py-2 border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 ${
+                prepaymentError ? 'border-red-400' : 'border-gray-300'
+              }`}
+            />
+            {prepaymentError && (
+              <p className="text-xs text-red-600 mt-1">{prepaymentError}</p>
+            )}
+          </FormField>
+
+          <FormField label="ቅርንጫፍ">
+            <select
+              name="branch"
+              value={form.branch}
+              onChange={onChange}
+              disabled={isStaff && Boolean(staffBranch)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 disabled:bg-gray-100"
+            >
+              <option value="">— ይምረጡ —</option>
+              {branches.map((b) => (
+                <option key={b._id} value={b._id}>{b.name}</option>
+              ))}
+            </select>
+          </FormField>
+
+          <FormField label="የትዕዛዝ ቀን">
+            <EthiopianDateInput
+              value={form.orderDate}
+              onChange={(iso) => setForm((prev) => ({ ...prev, orderDate: iso }))}
+            />
+          </FormField>
+
+          <FormField label="የቀጠሮ ቀን *">
+            <EthiopianDateInput
+              value={form.appointmentDate}
+              onChange={(iso) => setForm((prev) => ({ ...prev, appointmentDate: iso }))}
+              required
+            />
           </FormField>
         </div>
       </div>
 
       {/* Measurements */}
       <div>
-        <h4 className="text-sm font-semibold text-gray-700 mb-2">ልኬት</h4>
+        <h4 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+          <Package size={14} /> ልኬት
+        </h4>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <FormField label="ስፋት">
-            <input type="number" name="width" value={form.measurements.width} onChange={onMeasurementChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
+            <input
+              name="width"
+              value={form.measurements?.width || ''}
+              onChange={onMeasurementChange}
+              placeholder="cm"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800"
             />
           </FormField>
           <FormField label="ቁመት">
-            <input type="number" name="height" value={form.measurements.height} onChange={onMeasurementChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
+            <input
+              name="height"
+              value={form.measurements?.height || ''}
+              onChange={onMeasurementChange}
+              placeholder="cm"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800"
             />
           </FormField>
           <FormField label="ጥልቀት">
-            <input type="number" name="depth" value={form.measurements.depth} onChange={onMeasurementChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
+            <input
+              name="depth"
+              value={form.measurements?.depth || ''}
+              onChange={onMeasurementChange}
+              placeholder="cm"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800"
             />
           </FormField>
           <FormField label="መለኪያ">
-            <input name="unit" value={form.measurements.unit} onChange={onMeasurementChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
-            />
-          </FormField>
-        </div>
-      </div>
-
-      {/* Payment — prepayment is REQUIRED, min 1000 ETB */}
-      <div>
-        <h4 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-          <DollarSign size={14} /> ክፍያ
-        </h4>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <FormField label={`ቅድመ ክፍያ (ETB) * (ቢያንስ ${MIN_PREPAYMENT.toLocaleString()})`}>
             <input
-              type="number"
-              name="prepayment"
-              value={form.prepayment}
-              onChange={onChange}
-              min={MIN_PREPAYMENT}
-              step="1"
-              required
-              className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white ${
-                prepaymentError ? 'border-red-400 ring-2 ring-red-200' : 'border-gray-300'
-              }`}
-            />
-            {prepaymentError && (
-              <p className="text-[11px] text-red-600 mt-1">{prepaymentError}</p>
-            )}
-            {!prepaymentError && form.prepayment > 0 && (
-              <p className="text-[11px] text-green-600 mt-1">✓ ትክክል</p>
-            )}
-          </FormField>
-          <FormField label="ቀሪ ክፍያ (በራስ-ሰር)">
-            <input type="number" value={remainingPayment} readOnly
-              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50 text-orange-600 font-semibold cursor-not-allowed"
+              name="unit"
+              value={form.measurements?.unit || 'cm'}
+              onChange={onMeasurementChange}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800"
             />
           </FormField>
         </div>
       </div>
 
-      <FormField label="ማስታወሻ">
-        <textarea name="note" value={form.note} onChange={onChange} rows={2}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm resize-none text-gray-800 bg-white"
+      {/* Note */}
+      <FormField label="ማስታወሻ" full>
+        <textarea
+          name="note"
+          value={form.note}
+          onChange={onChange}
+          rows={2}
+          className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800"
         />
       </FormField>
 
-      <div className="bg-blue-50 rounded-lg p-3 space-y-1.5 text-sm">
-        <div className="flex justify-between">
-          <span className="text-gray-600">ጠቅላላ ዋጋ:</span>
-          <span className="font-semibold text-gray-800">{formatETB(totalPrice)}</span>
+      {/* Price Summary */}
+      <div className="p-3 rounded-lg bg-gray-50 border border-gray-200 flex flex-wrap items-center justify-between gap-3 text-sm">
+        <div>
+          <span className="text-gray-500">ጠቅላላ ዋጋ: </span>
+          <span className="font-bold text-gray-800">{formatETB(totalPrice)}</span>
         </div>
-        <div className="flex justify-between">
-          <span className="text-gray-600">ቅድመ ክፍያ:</span>
-          <span className={`font-semibold ${form.prepayment >= MIN_PREPAYMENT ? 'text-green-600' : 'text-red-600'}`}>
-            {formatETB(form.prepayment)}
-          </span>
+        <div>
+          <span className="text-gray-500">ቅድመ ክፍያ: </span>
+          <span className="font-semibold text-green-600">{formatETB(form.prepayment || 0)}</span>
         </div>
-        <div className="flex justify-between pt-1.5 border-t border-blue-200">
-          <span className="text-gray-600 font-medium">ቀሪ ክፍያ:</span>
-          <span className="font-bold text-brand">{formatETB(remainingPayment)}</span>
+        <div>
+          <span className="text-gray-500">ቀሪ ሂሳብ: </span>
+          <span className="font-bold text-red-600">{formatETB(remainingPayment)}</span>
         </div>
       </div>
 
       <div className="flex gap-2 pt-2 border-t border-gray-200">
-        <button type="button" onClick={onCancel}
-          className="flex-1 px-4 py-2.5 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 transition">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="flex-1 px-4 py-2.5 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 transition"
+        >
           ሰርዝ
         </button>
         <button
           type="submit"
-          disabled={Boolean(prepaymentError)}
-          className="flex-1 px-4 py-2.5 rounded-lg bg-brand text-white font-semibold hover:bg-brand-dark transition disabled:opacity-50 disabled:cursor-not-allowed">
+          className="flex-1 px-4 py-2.5 rounded-lg bg-brand text-white font-semibold hover:bg-brand-dark transition"
+        >
           {order ? 'አስተካክል' : 'ጨምር'}
         </button>
       </div>
     </form>
+  );
+}
+
+function OrderView({ order, onAdvanceStatus, onAddPayment, canManage }) {
+  const [payAmount, setPayAmount] = useState('');
+  const [submittingPay, setSubmittingPay] = useState(false);
+
+  const status = ORDER_STATUS[order.status] || { label: order.status, color: 'gray' };
+  const nextStatusKey = NEXT_STATUS[order.status];
+  const nextStatusLabel = nextStatusKey ? (ORDER_STATUS[nextStatusKey]?.label || nextStatusKey) : null;
+  const remaining = Number(order.remainingPayment) || 0;
+
+  const handlePaySubmit = async (e) => {
+    e.preventDefault();
+    const amt = Number(payAmount);
+    if (!amt || amt <= 0) {
+      toast.error('መጠን ያስገቡ');
+      return;
+    }
+    setSubmittingPay(true);
+    try {
+      await onAddPayment(amt);
+      setPayAmount('');
+    } finally {
+      setSubmittingPay(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4 text-sm">
+      <div className="flex items-center justify-between pb-3 border-b border-gray-100">
+        <div>
+          <p className="font-mono text-xs text-brand font-semibold">{order.orderNumber}</p>
+          <p className="font-bold text-gray-800 text-lg mt-0.5">{order.customerName}</p>
+          <p className="text-xs text-gray-500">{order.customerPhone}</p>
+        </div>
+        <Badge color={status.color}>{status.label}</Badge>
+      </div>
+
+      <div className="space-y-2.5">
+        <Row label="አድራሻ" value={order.address || '-'} />
+        <Row label="የዕቃ ዓይነት" value={order.itemType} />
+        <Row label="ብዛት" value={order.quantity} bold />
+        <Row label="የአንዱ ዋጋ" value={formatETB(order.unitPrice || 0)} />
+        <Row label="ጠቅላላ ዋጋ" value={formatETB(order.totalPrice || 0)} bold />
+        <Row label="ቅድመ ክፍያ" value={formatETB(order.prepayment || 0)} color="text-green-600" bold />
+        <Row label="ቀሪ ሂሳብ" value={formatETB(remaining)} color={remaining > 0 ? 'text-red-600' : 'text-green-600'} bold />
+        <Row label="የትዕዛዝ ቀን" value={formatEthiopianDate(order.orderDate)} />
+        <Row label="የቀጠሮ ቀን" value={formatEthiopianDate(order.appointmentDate)} />
+        <Row label="ቅርንጫፍ" value={order.branch?.name || '-'} />
+        {order.note && <Row label="ማስታወሻ" value={order.note} />}
+      </div>
+
+      {canManage && remaining > 0 && (
+        <form onSubmit={handlePaySubmit} className="pt-3 border-t border-gray-100 flex items-center gap-2">
+          <input
+            type="number"
+            value={payAmount}
+            onChange={(e) => setPayAmount(e.target.value)}
+            placeholder="ተጨማሪ ክፍያ (ETB)"
+            min={1}
+            max={remaining}
+            step="0.01"
+            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-800 bg-white focus:outline-none focus:ring-2 focus:ring-brand"
+          />
+          <Button type="submit" disabled={submittingPay}>
+            <Wallet size={15} /> ክፍያ መዝግብ
+          </Button>
+        </form>
+      )}
+
+      {canManage && nextStatusLabel && (
+        <div className="pt-3 border-t border-gray-100">
+          <Button
+            type="button"
+            onClick={onAdvanceStatus}
+            className="w-full justify-center"
+          >
+            <Truck size={16} /> ወደ "{nextStatusLabel}" አሸጋግር
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1043,148 +1168,13 @@ function FormField({ label, children, full }) {
   );
 }
 
-// ============================================================
-// Order view
-// ============================================================
-function OrderView({ order, onAdvanceStatus, onAddPayment, canManage }) {
-  const status = ORDER_STATUS[order.status] || { label: order.status, color: 'gray' };
-  const next = NEXT_STATUS[order.status];
-  const nextLabel = next ? (ORDER_STATUS[next]?.label || next) : null;
-
-  const [amount, setAmount] = useState('');
-  const [busy, setBusy] = useState(false);
-  const remaining = Number(order.remainingPayment) || 0;
-
-  const handleAdd = async (e) => {
-    e.preventDefault();
-    const amt = Number(amount);
-    if (!amt || amt <= 0 || amt > remaining) {
-      toast.error('ትክክለኛ መጠን ያስገቡ');
-      return;
-    }
-    setBusy(true);
-    try {
-      await onAddPayment(amt);
-      setAmount('');
-    } finally {
-      setBusy(false);
-    }
-  };
-
+function Row({ label, value, mono, bold, color }) {
   return (
-    <div className="space-y-4 text-sm">
-      <div className="flex items-center justify-between pb-3 border-b border-gray-100">
-        <div>
-          <p className="font-mono text-xs text-brand font-semibold">{order.orderNumber}</p>
-          <p className="font-bold text-gray-800 text-lg">{order.customerName}</p>
-        </div>
-        <Badge color={status.color}>{status.label}</Badge>
-      </div>
-
-      <div className="space-y-2">
-        <div className="flex justify-between gap-3">
-          <span className="text-gray-500 flex items-center gap-1"><Phone size={12} /> ስልክ:</span>
-          <span className="text-gray-800">{order.customerPhone || '-'}</span>
-        </div>
-        <div className="flex justify-between gap-3">
-          <span className="text-gray-500 flex items-center gap-1"><MapPin size={12} /> አድራሻ:</span>
-          <span className="text-gray-800 text-right">{order.address || '-'}</span>
-        </div>
-        <div className="flex justify-between gap-3">
-          <span className="text-gray-500 flex items-center gap-1"><Package size={12} /> የዕቃ ዓይነት:</span>
-          <span className="text-gray-800 font-medium">{order.itemType || '-'}</span>
-        </div>
-        <div className="flex justify-between gap-3">
-          <span className="text-gray-500">ብዛት:</span>
-          <span className="text-gray-800 font-semibold">{order.quantity}</span>
-        </div>
-        <div className="flex justify-between gap-3">
-          <span className="text-gray-500 flex items-center gap-1"><Calendar size={12} /> የትዕዛዝ ቀን:</span>
-          <span className="text-gray-800">{formatEthiopianDate(order.orderDate)}</span>
-        </div>
-        <div className="flex justify-between gap-3">
-          <span className="text-gray-500 flex items-center gap-1"><Calendar size={12} /> ቀጠሮ ቀን:</span>
-          <span className="text-gray-800">{formatEthiopianDate(order.appointmentDate)}</span>
-        </div>
-        {order.branch?.name && (
-          <div className="flex justify-between gap-3">
-            <span className="text-gray-500 flex items-center gap-1"><Building2 size={12} /> ቅርንጫፍ:</span>
-            <span className="text-gray-800">{order.branch.name}</span>
-          </div>
-        )}
-      </div>
-
-      {order.measurements && (order.measurements.width || order.measurements.height || order.measurements.depth) && (
-        <div className="p-3 rounded-lg bg-gray-50">
-          <p className="text-xs font-semibold text-gray-600 mb-1">ልኬት</p>
-          <p className="text-xs text-gray-700">
-            {[
-              order.measurements.width ? `ስፋት: ${order.measurements.width}` : null,
-              order.measurements.height ? `ቁመት: ${order.measurements.height}` : null,
-              order.measurements.depth ? `ጥልቀት: ${order.measurements.depth}` : null,
-            ].filter(Boolean).join(' · ')} {order.measurements.unit || 'cm'}
-          </p>
-        </div>
-      )}
-
-      <div className="p-3 rounded-lg bg-blue-50 space-y-1.5">
-        <div className="flex justify-between">
-          <span className="text-gray-600">ጠቅላላ ዋጋ:</span>
-          <span className="font-semibold text-gray-800">{formatETB(order.totalPrice || 0)}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-gray-600">ቅድመ ክፍያ:</span>
-          <span className="font-semibold text-green-600">{formatETB(order.prepayment || 0)}</span>
-        </div>
-        <div className="flex justify-between pt-1 border-t border-blue-200">
-          <span className="text-gray-700 font-medium">ቀሪ ክፍያ:</span>
-          <span className="font-bold text-orange-600">{formatETB(remaining)}</span>
-        </div>
-      </div>
-
-      {order.note && (
-        <div className="p-3 rounded-lg bg-gray-50">
-          <p className="text-xs font-semibold text-gray-600 mb-1">ማስታወሻ</p>
-          <p className="text-xs text-gray-700">{order.note}</p>
-        </div>
-      )}
-
-      {canManage && remaining > 0 && (
-        <form onSubmit={handleAdd} className="flex items-center gap-2 pt-2 border-t border-gray-100">
-          <div className="relative flex-1">
-            <Wallet size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              type="number"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder={`ተጨማሪ ክፍያ (ከፍተኛ ${remaining})`}
-              min={1}
-              max={remaining}
-              step="0.01"
-              className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={busy}
-            className="px-3 py-2 rounded-lg bg-green-600 text-white text-xs font-semibold hover:bg-green-700 transition disabled:opacity-50"
-          >
-            ክፍያ መዝግብ
-          </button>
-        </form>
-      )}
-
-      {canManage && next && (
-        <div className="pt-2">
-          <button
-            type="button"
-            onClick={onAdvanceStatus}
-            className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-brand text-white text-xs font-semibold hover:bg-brand-dark transition"
-          >
-            <Truck size={14} /> ወደ "{nextLabel}" አሸጋግር
-          </button>
-        </div>
-      )}
+    <div className="flex justify-between gap-3">
+      <span className="text-gray-500 flex-shrink-0">{label}:</span>
+      <span className={`text-right ${bold ? 'font-semibold' : ''} ${mono ? 'font-mono text-xs' : ''} ${color || 'text-gray-800'}`}>
+        {value}
+      </span>
     </div>
   );
 }

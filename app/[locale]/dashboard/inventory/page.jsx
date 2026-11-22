@@ -271,6 +271,8 @@ function EthiopianDateInput({ value, onChange, required = false, placeholder = '
   );
 }
 
+const STAFF_ROLES = ['seller', 'cashier', 'storekeeper'];
+
 export default function InventoryPage() {
   const { user } = useAuth();
 
@@ -288,7 +290,9 @@ export default function InventoryPage() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
-  const canManage = user?.role === 'admin' || user?.role === 'seller';
+  const isAdminActor = user?.role === 'admin' || user?.role === 'owner';
+  const isStaffActor = STAFF_ROLES.includes(user?.role);
+  const canManage = isAdminActor || isStaffActor;
 
   useEffect(() => {
     let cancelled = false;
@@ -309,16 +313,16 @@ export default function InventoryPage() {
 
   const userBranchId = useMemo(() => {
     if (!user?.branch) return null;
-    return typeof user.branch === 'object' ? user.branch._id : user.branch;
+    return String(typeof user.branch === 'object' ? user.branch._id : user.branch);
   }, [user]);
 
   const roleFiltered = useMemo(() => {
     let result = items;
-    if (user?.role === 'seller' && userBranchId) {
-      result = result.filter((i) => (i.branch?._id || i.branch) === userBranchId);
+    if (isStaffActor && userBranchId) {
+      result = result.filter((i) => String(i.branch?._id || i.branch) === userBranchId);
     }
     return result;
-  }, [items, user, userBranchId]);
+  }, [items, isStaffActor, userBranchId]);
 
   const filtered = useMemo(() => {
     return roleFiltered.filter((i) => {
@@ -348,6 +352,21 @@ export default function InventoryPage() {
     const lowStock = roleFiltered.filter((i) => (i.quantity || 0) < 10).length;
     return { total, totalValue, totalQuantity, lowStock };
   }, [roleFiltered]);
+
+  const canActorModifyItem = (item) => {
+    if (!item) return canManage;
+    if (isAdminActor) return true;
+    if (!isStaffActor) return false;
+    const itemBranchId = item.branch?._id
+      ? String(item.branch._id)
+      : item.branch
+      ? String(item.branch)
+      : null;
+    if (userBranchId && itemBranchId) {
+      return itemBranchId === userBranchId;
+    }
+    return true;
+  };
 
   const handleDeleteClick = (item) => setDeleteTarget(item);
 
@@ -416,7 +435,7 @@ export default function InventoryPage() {
           <p className="text-sm text-gray-500 mt-1">
             {filtered.length} ዕቃዎች · {formatETB(stats.totalValue)} ጠቅላላ ዋጋ
           </p>
-          {user?.role === 'seller' && userBranchId && (
+          {isStaffActor && userBranchId && (
             <p className="text-xs text-brand font-medium mt-1 flex items-center gap-1">
               <Building2 size={12} />
               {typeof user.branch === 'object' ? user.branch.name : 'ቅርንጫፍ'}
@@ -450,7 +469,7 @@ export default function InventoryPage() {
             />
           </div>
 
-          {user?.role === 'admin' ? (
+          {isAdminActor ? (
             <select
               value={branchFilter}
               onChange={(e) => setBranchFilter(e.target.value)}
@@ -507,6 +526,7 @@ export default function InventoryPage() {
               ) : (
                 filtered.map((item) => {
                   const branchName = item.branch?.name || '-';
+                  const rowCanModify = canActorModifyItem(item);
                   return (
                     <tr key={item._id} className="border-b border-gray-100 hover:bg-gray-50">
                       <td className="px-4 py-3 font-mono text-xs text-brand font-medium">{item.itemCode}</td>
@@ -535,8 +555,8 @@ export default function InventoryPage() {
                           onView={() => setViewItem(item)}
                           onEdit={() => { setEditingItem(item); setShowModal(true); }}
                           onDelete={() => handleDeleteClick(item)}
-                          canEdit={canManage}
-                          canDelete={canManage}
+                          canEdit={rowCanModify}
+                          canDelete={rowCanModify}
                         />
                       </td>
                     </tr>
@@ -605,9 +625,9 @@ function StatCard({ label, value, icon: Icon, color }) {
 }
 
 function ItemForm({ item, branches, onSave, onCancel, currentUser }) {
-  const isSeller = currentUser?.role === 'seller';
+  const isStaff = STAFF_ROLES.includes(currentUser?.role);
 
-  const defaultBranch = isSeller && currentUser?.branch
+  const defaultBranch = isStaff && currentUser?.branch
     ? (typeof currentUser.branch === 'object' ? currentUser.branch._id : currentUser.branch)
     : (item?.branch?._id || item?.branch || '');
 
@@ -685,7 +705,7 @@ function ItemForm({ item, branches, onSave, onCancel, currentUser }) {
       </div>
 
       <FormField label="ቅርንጫፍ">
-        {isSeller ? (
+        {isStaff ? (
           <div className="w-full px-3 py-2 rounded-lg bg-blue-50 text-blue-700 text-sm font-medium">
             {typeof currentUser.branch === 'object' ? currentUser.branch?.name : 'ቅርንጫፍ'}
           </div>

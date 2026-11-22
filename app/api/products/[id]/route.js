@@ -4,20 +4,25 @@ import connectDB from '@/lib/db';
 import { Product, Employee } from '@/models';
 import { requireAuth } from '@/lib/auth';
 
+const ADMIN_ROLES = ['admin', 'owner'];
+const STAFF_ROLES = ['seller', 'cashier', 'storekeeper'];
+
 function isAdminUser(user) {
-  return ['admin', 'owner'].includes(user?.role);
+  return ADMIN_ROLES.includes(user?.role);
+}
+
+function normalizeId(val) {
+  if (!val) return null;
+  return String(typeof val === 'object' ? val._id || val.id || '' : val) || null;
 }
 
 async function getStaffContext(user) {
-  const emp = await Employee.findOne({ user: user._id || user.id })
-    .select('branch permissions')
-    .lean();
-
-  const branchId = (user?.branch?._id || user?.branch)
-    ? String(user.branch._id || user.branch)
-    : emp?.branch
-    ? String(emp.branch)
+  const userId = user?._id || user?.id;
+  const emp = userId
+    ? await Employee.findOne({ user: userId }).select('branch permissions').lean()
     : null;
+
+  const branchId = normalizeId(user?.branch) || normalizeId(emp?.branch);
 
   const perms = {
     ...(emp?.permissions?.products || {}),
@@ -25,6 +30,13 @@ async function getStaffContext(user) {
   };
 
   return { branchId, perms };
+}
+
+function hasBranchAccess(userBranchId, targetBranchId, perms, allowUnassignedLegacy = false) {
+  if (perms?.allBranches) return true;
+  if (!userBranchId) return false;
+  if (!targetBranchId) return allowUnassignedLegacy;
+  return userBranchId === targetBranchId;
 }
 
 export async function GET(req, { params }) {
@@ -36,33 +48,34 @@ export async function GET(req, { params }) {
   const { user, error } = await requireAuth(req);
   if (error) return error;
 
-  await connectDB();
-  const product = await Product.findById(id)
-    .populate('branch', 'name code')
-    .populate('createdBy', 'fullName phone')
-    .lean();
+  try {
+    await connectDB();
+    const product = await Product.findById(id)
+      .populate('branch', 'name code')
+      .populate('createdBy', 'fullName phone')
+      .lean();
 
-  if (!product) {
-    return NextResponse.json({ error: 'Product not found' }, { status: 404 });
-  }
-
-  if (!isAdminUser(user)) {
-    const { branchId, perms } = await getStaffContext(user);
-    const productBranchId = product.branch?._id
-      ? String(product.branch._id)
-      : product.branch
-      ? String(product.branch)
-      : null;
-
-    if (!perms.allBranches && (!branchId || productBranchId !== branchId)) {
-      return NextResponse.json(
-        { error: 'ይህንን ዕቃ ከተመደቡበት ቅርንጫፍ ውጭ ማየት አይችሉም' },
-        { status: 403 }
-      );
+    if (!product) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 });
     }
-  }
 
-  return NextResponse.json(product);
+    if (!isAdminUser(user)) {
+      const { branchId, perms } = await getStaffContext(user);
+      const productBranchId = normalizeId(product.branch);
+
+      if (!hasBranchAccess(branchId, productBranchId, perms, true)) {
+        return NextResponse.json(
+          { error: 'ይህንን ዕቃ ከተመደቡበት ቅርንጫፍ ውጭ ማየት አይችሉም' },
+          { status: 403 }
+        );
+      }
+    }
+
+    return NextResponse.json(product);
+  } catch (err) {
+    console.error('[products:GET]', err);
+    return NextResponse.json({ error: err.message || 'Fetch failed' }, { status: 500 });
+  }
 }
 
 export async function PATCH(req, { params }) {
@@ -88,14 +101,14 @@ export async function PATCH(req, { params }) {
     if (!admin) {
       const { branchId, perms } = await getStaffContext(user);
       const canEdit =
-        ['seller', 'storekeeper'].includes(user.role) || Boolean(perms.update || perms.edit);
+        STAFF_ROLES.includes(user.role) || Boolean(perms.update || perms.edit);
 
       if (!canEdit) {
         return NextResponse.json({ error: 'ዕቃ ለማስተካከል ፈቃድ የለዎትም' }, { status: 403 });
       }
 
-      const productBranchId = product.branch ? String(product.branch) : null;
-      if (!perms.allBranches && (!branchId || productBranchId !== branchId)) {
+      const productBranchId = normalizeId(product.branch);
+      if (!hasBranchAccess(branchId, productBranchId, perms, true)) {
         return NextResponse.json(
           { error: 'ከተመደቡበት ቅርንጫፍ ውጭ ያለ ዕቃ ማስተካከል አይችሉም' },
           { status: 403 }
@@ -103,7 +116,6 @@ export async function PATCH(req, { params }) {
       }
     }
 
-    // Only admin/owner can reassign a product to a different branch
     const allowed = admin
       ? [
           'name', 'category', 'description', 'quantity', 'unit',
@@ -134,7 +146,6 @@ export async function PATCH(req, { params }) {
     }
 
     await product.save();
-
     await product.populate('branch', 'name code');
     await product.populate('createdBy', 'fullName phone');
 
@@ -162,27 +173,39 @@ export async function DELETE(req, { params }) {
   const { user, error } = await requireAuth(req);
   if (error) return error;
 
-  await connectDB();
-  const product = await Product.findById(id);
-  if (!product) {
-    return NextResponse.json({ error: 'Product not found' }, { status: 404 });
-  }
-
-  const admin = isAdminUser(user);
-  if (!admin) {
-    const { branchId, perms } = await getStaffContext(user);
-    const productBranchId = product.branch ? String(product.branch) : null;
-    const canDeleteOwnBranch =
-      Boolean(perms.delete) && branchId && productBranchId === branchId;
-
-    if (!canDeleteOwnBranch) {
-      return NextResponse.json(
-        { error: 'ይህንን ዕቃ ለመሰረዝ ፈቃድ የለዎትም' },
-        { status: 403 }
-      );
+  try {
+    await connectDB();
+    const product = await Product.findById(id);
+    if (!product) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 });
     }
-  }
 
-  await product.deleteOne();
-  return NextResponse.json({ ok: true });
+    const admin = isAdminUser(user);
+    if (!admin) {
+      const { branchId, perms } = await getStaffContext(user);
+      const canDeleteRole =
+        STAFF_ROLES.includes(user.role) || Boolean(perms.delete);
+
+      if (!canDeleteRole) {
+        return NextResponse.json(
+          { error: 'ይህንን ዕቃ ለመሰረዝ ፈቃድ የለዎትም' },
+          { status: 403 }
+        );
+      }
+
+      const productBranchId = normalizeId(product.branch);
+      if (!hasBranchAccess(branchId, productBranchId, perms, true)) {
+        return NextResponse.json(
+          { error: 'ከተመደቡበት ቅርንጫፍ ውጭ ያለ ዕቃ መሰረዝ አይችሉም' },
+          { status: 403 }
+        );
+      }
+    }
+
+    await product.deleteOne();
+    return NextResponse.json({ ok: true, id });
+  } catch (err) {
+    console.error('[products:DELETE]', err);
+    return NextResponse.json({ error: err.message || 'Delete failed' }, { status: 500 });
+  }
 }

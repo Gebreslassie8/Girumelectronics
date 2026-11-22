@@ -1,12 +1,42 @@
 import { NextResponse } from 'next/server';
+import mongoose from 'mongoose';
 import connectDB from '@/lib/db';
 import { Order } from '@/models';
-import { requireAuth, requireRole } from '@/lib/auth';
+import { requireAuth } from '@/lib/auth';
 
-export async function GET(req, { params }) {
-  const { id } = await params;
-  const { error } = await requireAuth(req);
+const STAFF_ROLES = ['seller', 'cashier', 'storekeeper'];
+
+function getUserBranchId(user) {
+  if (!user?.branch) return null;
+  return String(typeof user.branch === 'object' ? user.branch._id : user.branch);
+}
+
+function canAccessOrder(user, order) {
+  if (!user || !order) return false;
+  if (user.role === 'admin' || user.role === 'owner') return true;
+
+  if (STAFF_ROLES.includes(user.role)) {
+    const userBranch = getUserBranchId(user);
+    const orderBranch = order.branch
+      ? String(typeof order.branch === 'object' ? order.branch._id : order.branch)
+      : null;
+    if (userBranch && orderBranch) {
+      return userBranch === orderBranch;
+    }
+    return true;
+  }
+
+  return false;
+}
+
+export async function GET(req, context) {
+  const { error, user } = await requireAuth(req);
   if (error) return error;
+
+  const { id } = await context.params;
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
+  }
 
   await connectDB();
   const order = await Order.findById(id)
@@ -14,64 +44,112 @@ export async function GET(req, { params }) {
     .populate('product', 'name code')
     .populate('createdBy', 'fullName phone')
     .lean();
-  if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+
+  if (!order) {
+    return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+  }
+
+  if (!canAccessOrder(user, order)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+
   return NextResponse.json(order);
 }
 
-export async function PATCH(req, { params }) {
-  const { id } = await params;
-  const { error } = await requireRole(req, 'admin', 'owner', 'seller');
+export async function PATCH(req, context) {
+  const { error, user } = await requireAuth(req);
   if (error) return error;
+
+  const { id } = await context.params;
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
+  }
 
   try {
     await connectDB();
+    const existing = await Order.findById(id);
+    if (!existing) {
+      return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+    }
+
+    if (!canAccessOrder(user, existing)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
     const body = await req.json();
 
-    const order = await Order.findById(id);
-    if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+    const qty = body.quantity !== undefined ? Number(body.quantity) : existing.quantity;
+    const unitPrice = body.unitPrice !== undefined ? Number(body.unitPrice) : existing.unitPrice;
+    const totalPrice =
+      body.totalPrice !== undefined ? Number(body.totalPrice) : (Number(qty) || 1) * (Number(unitPrice) || 0);
+    const prepayment =
+      body.prepayment !== undefined ? Number(body.prepayment) : existing.prepayment;
+    const remainingPayment =
+      body.remainingPayment !== undefined
+        ? Number(body.remainingPayment)
+        : Math.max(totalPrice - (Number(prepayment) || 0), 0);
 
-    const allowed = [
-      'customerName', 'customerPhone', 'address', 'itemType', 'product',
-      'quantity', 'unitPrice', 'totalPrice', 'prepayment',
-      'status', 'orderDate', 'appointmentDate', 'note', 'branch', 'measurements',
-    ];
+    if (body.customerName !== undefined) existing.customerName = String(body.customerName).trim();
+    if (body.customerPhone !== undefined) existing.customerPhone = String(body.customerPhone).trim();
+    if (body.address !== undefined) existing.address = String(body.address).trim();
+    if (body.itemType !== undefined) existing.itemType = body.itemType;
+    if (body.quantity !== undefined) existing.quantity = Number(qty) || 1;
+    if (body.unitPrice !== undefined) existing.unitPrice = Number(unitPrice) || 0;
+    existing.totalPrice = totalPrice;
+    existing.prepayment = Number(prepayment) || 0;
+    existing.remainingPayment = remainingPayment;
+    if (body.status !== undefined) existing.status = body.status;
+    if (body.orderDate !== undefined && body.orderDate) {
+      const parsedOrderDate = new Date(body.orderDate);
+      if (!isNaN(parsedOrderDate.getTime())) existing.orderDate = parsedOrderDate;
+    }
+    if (body.appointmentDate !== undefined && body.appointmentDate) {
+      const parsedAppointment = new Date(body.appointmentDate);
+      if (!isNaN(parsedAppointment.getTime())) existing.appointmentDate = parsedAppointment;
+    }
+    if (body.note !== undefined) existing.note = body.note || undefined;
+    if (body.measurements !== undefined) existing.measurements = body.measurements || {};
 
-    for (const k of allowed) {
-      if (body[k] !== undefined) {
-        order[k] = body[k] === '' && k === 'branch' ? null : body[k];
-      }
+    // Keep staff locked to their own branch unless admin/owner specifies another
+    if (body.branch !== undefined && (user.role === 'admin' || user.role === 'owner')) {
+      existing.branch = body.branch || existing.branch;
     }
 
-    if (body.quantity != null || body.unitPrice != null || body.prepayment != null) {
-      order.totalPrice = (order.quantity || 0) * (order.unitPrice || 0);
-      order.remainingPayment = Math.max(order.totalPrice - (order.prepayment || 0), 0);
-    }
+    await existing.save();
+    await existing.populate('branch', 'name code');
+    await existing.populate('createdBy', 'fullName phone');
 
-    await order.save();
-
-    await order.populate('branch', 'name code');
-    await order.populate('product', 'name code');
-    await order.populate('createdBy', 'fullName phone');
-
-    return NextResponse.json(order);
+    return NextResponse.json(existing);
   } catch (err) {
-    if (err.name === 'ValidationError') {
-      const errs = {};
-      for (const k of Object.keys(err.errors)) errs[k] = err.errors[k].message;
-      return NextResponse.json({ error: 'Validation failed', errors: errs }, { status: 400 });
-    }
     console.error('[orders:PATCH]', err);
     return NextResponse.json({ error: err.message || 'Update failed' }, { status: 500 });
   }
 }
 
-export async function DELETE(req, { params }) {
-  const { id } = await params;
-  const { error } = await requireRole(req, 'admin', 'owner');
+export async function DELETE(req, context) {
+  const { error, user } = await requireAuth(req);
   if (error) return error;
 
-  await connectDB();
-  const order = await Order.findByIdAndDelete(id);
-  if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
-  return NextResponse.json({ ok: true });
+  const { id } = await context.params;
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
+  }
+
+  try {
+    await connectDB();
+    const order = await Order.findById(id);
+    if (!order) {
+      return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+    }
+
+    if (!canAccessOrder(user, order)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    await order.deleteOne();
+    return NextResponse.json({ ok: true, id });
+  } catch (err) {
+    console.error('[orders:DELETE]', err);
+    return NextResponse.json({ error: err.message || 'Delete failed' }, { status: 500 });
+  }
 }

@@ -262,6 +262,8 @@ function EthiopianDateInput({ value, onChange, required = false }) {
   );
 }
 
+const STAFF_ROLES = ['seller', 'cashier', 'storekeeper'];
+
 export default function ReceiptsPage() {
   const { user } = useAuth();
 
@@ -279,7 +281,9 @@ export default function ReceiptsPage() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
-  const canManage = user?.role === 'admin' || user?.role === 'seller';
+  const isAdminActor = user?.role === 'admin' || user?.role === 'owner';
+  const isStaffActor = STAFF_ROLES.includes(user?.role);
+  const canManage = isAdminActor || isStaffActor;
 
   useEffect(() => {
     let cancelled = false;
@@ -300,19 +304,19 @@ export default function ReceiptsPage() {
 
   const userBranchId = useMemo(() => {
     if (!user?.branch) return null;
-    return typeof user.branch === 'object' ? user.branch._id : user.branch;
+    return String(typeof user.branch === 'object' ? user.branch._id : user.branch);
   }, [user]);
 
   const roleFiltered = useMemo(() => {
     let result = receipts;
-    if (user?.role === 'seller' && userBranchId) {
-      result = result.filter((r) => (r.branch?._id || r.branch) === userBranchId);
+    if (isStaffActor && userBranchId) {
+      result = result.filter((r) => String(r.branch?._id || r.branch) === userBranchId);
     }
     if (user?.role === 'customer') {
       result = result.filter((r) => r.customerPhone === user.phone);
     }
     return result;
-  }, [receipts, user, userBranchId]);
+  }, [receipts, user, isStaffActor, userBranchId]);
 
   const filtered = useMemo(() => {
     return roleFiltered.filter((r) => {
@@ -337,6 +341,21 @@ export default function ReceiptsPage() {
     const totalRemaining = roleFiltered.reduce((s, r) => s + (r.remainingPayment || 0), 0);
     return { total, active, completed, totalPrepaid, totalRemaining };
   }, [roleFiltered]);
+
+  const canActorModifyReceipt = (receipt) => {
+    if (!receipt) return canManage;
+    if (isAdminActor) return true;
+    if (!isStaffActor) return false;
+    const receiptBranchId = receipt.branch?._id
+      ? String(receipt.branch._id)
+      : receipt.branch
+      ? String(receipt.branch)
+      : null;
+    if (userBranchId && receiptBranchId) {
+      return receiptBranchId === userBranchId;
+    }
+    return true;
+  };
 
   const handleDeleteClick = (receipt) => setDeleteTarget(receipt);
 
@@ -379,8 +398,8 @@ export default function ReceiptsPage() {
     }
   };
 
-  const printOrDownloadPDF = (receipt) => {
-    const html = buildReceiptHTML(receipt, true);
+  const printOrDownloadPDF = (receipt, mode = 'print') => {
+    const html = buildReceiptHTML(receipt, { mode });
 
     const iframe = document.createElement('iframe');
     iframe.style.position = 'fixed';
@@ -391,7 +410,13 @@ export default function ReceiptsPage() {
     iframe.style.border = '0';
     iframe.srcdoc = html;
 
-    iframe.onload = () => {
+    const cleanup = () => {
+      setTimeout(() => {
+        if (iframe.parentNode) document.body.removeChild(iframe);
+      }, 60000);
+    };
+
+    iframe.onload = async () => {
       try {
         const iframeWindow = iframe.contentWindow;
         const iframeDoc = iframe.contentDocument || iframeWindow.document;
@@ -399,20 +424,19 @@ export default function ReceiptsPage() {
         const fontLinks = document.querySelectorAll('link[rel="stylesheet"], style');
         fontLinks.forEach((node) => {
           if (node.tagName === 'LINK') {
-            const clone = node.cloneNode();
-            iframeDoc.head.appendChild(clone);
+            iframeDoc.head.appendChild(node.cloneNode());
           } else if (node.tagName === 'STYLE') {
-            const clone = node.cloneNode(true);
-            iframeDoc.head.appendChild(clone);
+            iframeDoc.head.appendChild(node.cloneNode(true));
           }
         });
 
+        if (iframeDoc.fonts && iframeDoc.fonts.ready) {
+          await iframeDoc.fonts.ready;
+        }
+
         iframeWindow.focus();
         iframeWindow.print();
-
-        setTimeout(() => {
-          if (iframe.parentNode) document.body.removeChild(iframe);
-        }, 60000);
+        cleanup();
       } catch (err) {
         console.error('[printPDF]', err);
         toast.error('PDF ማውጣት አልተሳካም');
@@ -423,8 +447,8 @@ export default function ReceiptsPage() {
     document.body.appendChild(iframe);
   };
 
-  const handlePrint = (receipt) => printOrDownloadPDF(receipt);
-  const handleDownload = (receipt) => printOrDownloadPDF(receipt);
+  const handlePrint = (receipt) => printOrDownloadPDF(receipt, 'print');
+  const handleDownload = (receipt) => printOrDownloadPDF(receipt, 'download');
 
   if (loading) {
     return (
@@ -453,7 +477,7 @@ export default function ReceiptsPage() {
             <span>{filtered.length} ደረሰኞች</span>
             <span>·</span>
             <span className="font-semibold text-emerald-700">{formatETB(stats.totalPrepaid)} የተከፈለ</span>
-            {user?.role === 'seller' && userBranchId && (
+            {isStaffActor && userBranchId && (
               <>
                 <span>·</span>
                 <span className="inline-flex items-center gap-1 text-xs font-medium text-brand bg-brand/5 px-2 py-0.5 rounded-full">
@@ -510,7 +534,7 @@ export default function ReceiptsPage() {
             ))}
           </select>
 
-          {user?.role === 'admin' ? (
+          {isAdminActor ? (
             <select
               value={branchFilter}
               onChange={(e) => setBranchFilter(e.target.value)}
@@ -565,6 +589,7 @@ export default function ReceiptsPage() {
               ) : (
                 filtered.map((receipt) => {
                   const status = RECEIPT_STATUS[receipt.status] || { label: receipt.status, color: 'gray' };
+                  const rowCanModify = canActorModifyReceipt(receipt);
                   return (
                     <tr key={receipt._id} className="hover:bg-gray-50/80 transition-colors">
                       <td className="px-4 py-3 font-mono text-xs text-brand font-semibold">
@@ -599,8 +624,8 @@ export default function ReceiptsPage() {
                           onView={() => setViewReceipt(receipt)}
                           onEdit={() => { setEditingReceipt(receipt); setShowModal(true); }}
                           onDelete={() => handleDeleteClick(receipt)}
-                          canEdit={canManage}
-                          canDelete={canManage}
+                          canEdit={rowCanModify}
+                          canDelete={rowCanModify}
                         />
                       </td>
                     </tr>
@@ -676,9 +701,9 @@ function StatCard({ label, value, icon: Icon, color }) {
 }
 
 function ReceiptForm({ receipt, branches, onSave, onCancel, currentUser }) {
-  const isSeller = currentUser?.role === 'seller';
+  const isStaff = STAFF_ROLES.includes(currentUser?.role);
 
-  const defaultBranch = isSeller && currentUser?.branch
+  const defaultBranch = isStaff && currentUser?.branch
     ? (typeof currentUser.branch === 'object' ? currentUser.branch._id : currentUser.branch)
     : (receipt?.branch?._id || receipt?.branch || '');
 
@@ -815,491 +840,492 @@ function ReceiptForm({ receipt, branches, onSave, onCancel, currentUser }) {
             ))}
           </select>
         </FormField>
-
-        <FormField label="ቅርንጫፍ *">
-          {isSeller ? (
-            <div className="w-full px-3 py-2 rounded-xl bg-blue-50 text-blue-700 text-sm font-medium">
-              {typeof currentUser.branch === 'object' ? currentUser.branch?.name : 'ቅርንጫፍ'}
-            </div>
-          ) : (
-            <select name="branch" value={form.branch} onChange={onChange} className={inputClass}>
-              <option value="">— ይምረጡ —</option>
-              {branches.length === 0 ? (
-                <option value="" disabled>ቅርንጫፍ በመጫን ላይ...</option>
-              ) : (
-                branches.map((b) => <option key={b._id} value={b._id}>{b.name}</option>)
-              )}
-            </select>
-          )}
+        <FormField label="ቅርንጫፍ">
+          <select
+            name="branch"
+            value={form.branch}
+            onChange={onChange}
+            disabled={isStaff && Boolean(defaultBranch)}
+            className={`${inputClass} disabled:bg-gray-100`}
+          >
+            <option value="">— ይምረጡ —</option>
+            {branches.map((b) => <option key={b._id} value={b._id}>{b.name}</option>)}
+          </select>
         </FormField>
       </div>
 
-      <FormField label="ማስታወሻ">
-        <textarea name="note" value={form.note} onChange={onChange} rows={3}
-          className={inputClass + ' resize-none'}
+      <FormField label="ማስታወሻ" full>
+        <textarea
+          name="note"
+          value={form.note}
+          onChange={onChange}
+          rows={2}
+          className={inputClass}
         />
       </FormField>
 
-      <div className="flex gap-2.5 pt-3 border-t border-gray-100">
-        <button type="button" onClick={onCancel}
-          className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-gray-700 font-semibold hover:bg-gray-50 transition">
+      <div className="flex gap-2 pt-2 border-t border-gray-200">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="flex-1 px-4 py-2.5 rounded-xl border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 transition"
+        >
           ሰርዝ
         </button>
-        <button type="submit"
-          className="flex-1 px-4 py-2.5 rounded-xl bg-brand text-white font-semibold hover:bg-brand-dark shadow-sm transition">
-          {receipt ? 'አስተካክል' : 'ፍጠር'}
+        <button
+          type="submit"
+          className="flex-1 px-4 py-2.5 rounded-xl bg-brand text-white font-semibold hover:bg-brand-dark transition"
+        >
+          {receipt ? 'አስተካክል' : 'ጨምር'}
         </button>
       </div>
     </form>
   );
 }
 
-function FormField({ label, children, full }) {
-  return (
-    <div className={full ? 'md:col-span-2' : ''}>
-      <label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>
-      {children}
-    </div>
-  );
-}
-
-function ReceiptView({ receipt, onPrint, onDownload }) {
-  const status = RECEIPT_STATUS[receipt.status] || { label: receipt.status, color: 'gray' };
-
-  return (
-    <div>
-      <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
-        <div className="bg-gradient-to-r from-brand to-brand-dark text-white p-5">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-bold leading-snug">ግሩም ዘመናዊ የኤሌክትሪክ እና ማገዶ ቆጣቢ ምጣድ</h2>
-              <p className="text-xs text-blue-100 font-semibold mt-0.5">GRUM STOVE &amp; MANUFACTURING</p>
-              <p className="text-xs text-blue-100 mt-1">አዲስ አበባ · ቦሌ ክ/ከተማ</p>
-              <p className="text-xs text-blue-100">0924 254 988 · 0903 284 493 · info@grumstove.com</p>
-            </div>
-            <div className="text-right flex-shrink-0">
-              <p className="text-[11px] text-blue-100 uppercase tracking-wider">ደረሰኝ ቁጥር</p>
-              <p className="font-mono font-bold text-base">{receipt.receiptNumber}</p>
-              <p className="text-xs text-blue-100 mt-1">{formatEthiopianDate(receipt.createdAt)}</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="p-5 space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
-              <p className="text-xs text-gray-500 mb-1">ደንበኛ</p>
-              <p className="font-semibold text-gray-800">{receipt.customerName}</p>
-              {receipt.customerPhone && (
-                <p className="text-xs text-gray-500 mt-0.5">{receipt.customerPhone}</p>
-              )}
-            </div>
-            <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
-              <p className="text-xs text-gray-500 mb-1">ሁኔታ</p>
-              <Badge color={status.color}>{status.label}</Badge>
-              {receipt.branch?.name && (
-                <p className="text-xs text-gray-500 mt-1">{receipt.branch.name}</p>
-              )}
-            </div>
-          </div>
-
-          <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-200">
-                  <th className="text-left py-1.5 text-xs font-semibold text-gray-600 uppercase">ዕቃ</th>
-                  <th className="text-right py-1.5 text-xs font-semibold text-gray-600 uppercase">መጠን</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td className="py-2 text-gray-800">
-                    <span className="font-medium">{receipt.itemType}</span>
-                    {receipt.productCode && (
-                      <p className="text-xs text-gray-500 font-mono">ኮድ: {receipt.productCode}</p>
-                    )}
-                    {receipt.order?.orderNumber && (
-                      <p className="text-xs text-gray-500 font-mono">ትዕዛዝ: {receipt.order.orderNumber}</p>
-                    )}
-                  </td>
-                  <td className="py-2 text-right text-gray-800 font-semibold">
-                    {formatETB(receipt.totalPrice || 0)}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          <div className="space-y-1.5 text-sm bg-gray-50/60 p-3.5 rounded-xl border border-gray-100">
-            <div className="flex justify-between">
-              <span className="text-gray-600">ጠቅላላ ዋጋ</span>
-              <span className="font-semibold text-gray-800">{formatETB(receipt.totalPrice || 0)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-600">ቅድመ ክፍያ</span>
-              <span className="font-semibold text-emerald-600">{formatETB(receipt.prepayment || 0)}</span>
-            </div>
-            <div className="flex justify-between pt-2 border-t border-gray-200">
-              <span className="font-semibold text-gray-700">ቀሪ ክፍያ</span>
-              <span className="font-bold text-red-600 text-base">{formatETB(receipt.remainingPayment || 0)}</span>
-            </div>
-          </div>
-
-          <div className="text-xs text-gray-500 space-y-1 border-t border-gray-100 pt-3">
-            {receipt.orderDate && <p>የትዕዛዝ ቀን: {formatEthiopianDate(receipt.orderDate)}</p>}
-            <p>ቀጠሮ ቀን: {formatEthiopianDate(receipt.appointmentDate)}</p>
-            <p>ቅርንጫፍ: {receipt.branch?.name || '-'}</p>
-            <p>ያዘጋጀው: {receipt.issuedBy?.fullName || '-'}</p>
-          </div>
-
-          {receipt.note && (
-            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 leading-relaxed">
-              {receipt.note}
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="mt-4 flex gap-2.5">
-        <button
-          onClick={onDownload}
-          className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gray-900 text-white font-semibold hover:bg-gray-800 transition"
-        >
-          <Download size={16} /> አውርድ PDF
-        </button>
-        <button
-          onClick={onPrint}
-          className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-brand text-white font-semibold hover:bg-brand-dark transition"
-        >
-          <Printer size={16} /> አትም
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function buildReceiptHTML(receipt, forPrint) {
-  const esc = (v) =>
+function buildReceiptHTML(receipt, options = {}) {
+  const safe = (v) =>
     String(v ?? '')
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
 
-  const fmtAmount = (val) => {
-    const n = Number(val) || 0;
-    return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const statusObj = RECEIPT_STATUS[receipt.status] || {
+    label: receipt.status || 'ንቁ',
+    color: 'gray',
   };
 
-  const receiptNo = receipt.receiptNumber || '';
-  const statusText = (receipt.status || 'ACTIVE').toUpperCase();
-  const branchName = receipt.branch?.name || '';
-  const customerName = receipt.customerName || '';
-  const customerPhone = receipt.customerPhone || '';
-  const itemType = receipt.itemType || '';
-  const productCode = receipt.productCode || '';
-  const qty = Number(receipt.quantity ?? receipt.order?.quantity ?? 1) || 1;
-  const totalPrice = Number(receipt.totalPrice) || 0;
-  const prepayment = Number(receipt.prepayment) || 0;
-  const remaining = receipt.remainingPayment !== undefined && receipt.remainingPayment !== null
-    ? Number(receipt.remainingPayment)
-    : Math.max(totalPrice - prepayment, 0);
+  const total = Math.max(Number(receipt.totalPrice) || 0, 0);
+  const prepaid = Math.max(Number(receipt.prepayment) || 0, 0);
+  const remaining =
+    receipt.remainingPayment !== undefined
+      ? Math.max(Number(receipt.remainingPayment) || 0, 0)
+      : Math.max(total - prepaid, 0);
 
-  const issuedEthDate = formatEthiopianDate(receipt.createdAt);
-  const orderEthDate = formatEthiopianDate(receipt.orderDate || receipt.createdAt);
-  const appointmentEthDate = formatEthiopianDate(receipt.appointmentDate);
-  const noteText = receipt.note || '';
-  const issuedByName = receipt.issuedBy?.fullName || 'Admin User';
+  const paidRatio = total > 0 ? Math.min(100, Math.round((prepaid / total) * 100)) : 100;
+  const isSettled = remaining <= 0 && total > 0;
+
+  const branchName = receipt.branch?.name || 'ዋና ቅርንጫፍ';
+  const branchCode = receipt.branch?.code ? ` (${receipt.branch.code})` : '';
+  const orderNum = receipt.order?.orderNumber || receipt.orderNumber || '—';
+  const issuedByName = receipt.issuedBy?.fullName || '—';
+
+  const orderDateEth = formatEthiopianDate(receipt.orderDate || receipt.createdAt);
+  const apptDateEth = formatEthiopianDate(receipt.appointmentDate);
+  const issuedDateEth = formatEthiopianDate(new Date());
+
+  const paymentBadgeLabel = isSettled ? 'ሙሉ ተከፍሏል · PAID' : 'ቀሪ ክፍያ አለው · PARTIAL';
+  const paymentBadgeBg = isSettled ? '#dcfce7' : '#fef3c7';
+  const paymentBadgeColor = isSettled ? '#166534' : '#92400e';
+  const barColor = isSettled ? '#16a34a' : '#d97706';
 
   return `<!DOCTYPE html>
 <html lang="am">
 <head>
   <meta charset="UTF-8" />
-  <title>ደረሰኝ</title>
+  <title>ደረሰኝ - ${safe(receipt.receiptNumber || '')}</title>
   <style>
     @page {
       size: A4 portrait;
-      margin: 0;
+      margin: 12mm;
     }
-    * { box-sizing: border-box; }
+    * {
+      box-sizing: border-box;
+    }
     body {
-      font-family: 'Noto Sans Ethiopic', system-ui, -apple-system, sans-serif;
-      margin: 0;
-      padding: 0;
+      font-family: "Noto Sans Ethiopic", "Abyssinica SIL", system-ui, -apple-system, sans-serif;
       color: #0f172a;
       background: #ffffff;
-      font-size: 12px;
+      margin: 0;
+      padding: 16px;
+      font-size: 13px;
       line-height: 1.45;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
-    .wrap {
+    .sheet {
       max-width: 720px;
       margin: 0 auto;
-      padding: 12mm 14mm;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 14px;
+      padding: 22px 24px;
+      background: #ffffff;
+      break-inside: avoid;
+    }
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      padding-bottom: 16px;
+      border-bottom: 2px solid #0f172a;
+    }
+    .brand-title {
+      font-size: 21px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: #0f172a;
+      margin: 0;
+    }
+    .brand-sub {
+      font-size: 12px;
+      color: #475569;
+      margin-top: 3px;
+    }
+    .doc-meta {
+      text-align: right;
+    }
+    .receipt-code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 14px;
+      font-weight: 700;
+      color: #1d4ed8;
+      background: #eff6ff;
+      padding: 4px 10px;
+      border-radius: 7px;
+      display: inline-block;
+      border: 1px solid #bfdbfe;
+    }
+    .pill-row {
+      margin-top: 6px;
+      display: flex;
+      justify-content: flex-end;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .pill {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 9px;
+      border-radius: 999px;
+      display: inline-block;
+    }
+    .pill-status {
+      background: #f1f5f9;
+      color: #334155;
+      border: 1px solid #cbd5e1;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-top: 16px;
     }
     .box {
-      border: 1px solid #cbd5e1;
-      border-radius: 8px;
-      padding: 14px 16px;
-      background: #ffffff;
-    }
-    .header-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 20px;
-      padding-bottom: 10px;
-      border-bottom: 1.5px solid #1e293b;
-    }
-    .company-am {
-      font-size: 15px;
-      font-weight: 700;
-      margin: 0;
-      color: #0f172a;
-    }
-    .company-en {
-      font-size: 11px;
-      font-weight: 700;
-      margin: 2px 0 6px;
-      color: #334155;
-      letter-spacing: 0.03em;
-    }
-    .company-lines {
-      font-size: 11px;
-      line-height: 1.5;
-      color: #334155;
-    }
-    .meta-right {
-      text-align: right;
-      font-size: 11px;
-      min-width: 150px;
-    }
-    .meta-lbl {
-      font-size: 10px;
-      color: #64748b;
-    }
-    .meta-val {
-      font-weight: 700;
-      font-size: 12px;
-      color: #0f172a;
-      margin-bottom: 5px;
-    }
-    .status-tag {
-      display: inline-block;
-      font-size: 10px;
-      font-weight: 700;
-      padding: 1px 7px;
-      border-radius: 4px;
-      border: 1px solid #94a3b8;
-      background: #f8fafc;
-      color: #0f172a;
-      margin-bottom: 5px;
-    }
-    .block {
-      margin-top: 10px;
-      padding: 9px 11px;
       border: 1px solid #e2e8f0;
-      border-radius: 6px;
-      background: #fcfcfd;
+      border-radius: 10px;
+      padding: 12px 14px;
+      background: #f8fafc;
     }
-    .block-title {
+    .box-title {
+      font-size: 11px;
       font-weight: 700;
-      font-size: 12px;
-      margin-bottom: 5px;
-      color: #0f172a;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #64748b;
+      margin-bottom: 8px;
+      border-bottom: 1px solid #e2e8f0;
+      padding-bottom: 4px;
     }
-    .line-pair {
+    .kv {
       display: flex;
       justify-content: space-between;
-      gap: 16px;
-      margin: 2px 0;
+      gap: 10px;
+      margin: 4px 0;
+      font-size: 12.5px;
     }
-    table {
+    .kv .k {
+      color: #64748b;
+      flex-shrink: 0;
+    }
+    .kv .v {
+      font-weight: 600;
+      color: #0f172a;
+      text-align: right;
+      word-break: break-word;
+    }
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+    }
+    .item-table {
       width: 100%;
       border-collapse: collapse;
-      margin-top: 4px;
-      font-size: 11.5px;
-      background: #ffffff;
+      margin-top: 16px;
+      font-size: 12.5px;
     }
-    th, td {
-      border: 1px solid #cbd5e1;
-      padding: 6px 8px;
+    .item-table th {
+      background: #0f172a;
+      color: #ffffff;
       text-align: left;
+      padding: 9px 12px;
+      font-weight: 600;
+      font-size: 11.5px;
     }
-    th {
-      font-weight: 700;
-      background: #f1f5f9;
-      color: #0f172a;
+    .item-table th.num,
+    .item-table td.num {
+      text-align: right;
     }
-    .c { text-align: center; }
-    .r { text-align: right; font-variant-numeric: tabular-nums; }
-    .summary-box {
+    .item-table td {
+      padding: 10px 12px;
+      border-bottom: 1px solid #e2e8f0;
+      color: #1e293b;
+      vertical-align: top;
+    }
+    .summary-wrap {
       display: flex;
       justify-content: space-between;
       align-items: flex-start;
       gap: 20px;
-      margin-top: 10px;
+      margin-top: 16px;
+      break-inside: avoid;
     }
-    .dates-side {
+    .progress-box {
       flex: 1;
-      padding: 9px 11px;
       border: 1px solid #e2e8f0;
-      border-radius: 6px;
-      background: #fcfcfd;
-      font-size: 11px;
+      border-radius: 10px;
+      padding: 12px 14px;
+      background: #ffffff;
     }
-    .dates-side .line-pair {
-      justify-content: flex-start;
-      gap: 14px;
+    .progress-head {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      font-weight: 600;
+      color: #334155;
       margin-bottom: 6px;
     }
-    .dates-side .line-pair:last-child {
-      margin-bottom: 0;
+    .progress-track {
+      width: 100%;
+      height: 8px;
+      background: #e2e8f0;
+      border-radius: 999px;
+      overflow: hidden;
     }
-    .amounts-side {
-      width: 245px;
-      border: 1px solid #cbd5e1;
-      border-radius: 6px;
-      padding: 6px 10px;
-      background: #ffffff;
-      font-size: 11.5px;
+    .progress-fill {
+      width: ${paidRatio}%;
+      height: 100%;
+      background: ${barColor};
     }
-    .amt-row {
-      display: flex;
-      justify-content: space-between;
-      padding: 4px 0;
-      border-bottom: 1px solid #e2e8f0;
-    }
-    .amt-row.last {
-      font-weight: 700;
-      border-bottom: none;
-      padding-top: 6px;
-      margin-top: 2px;
-      border-top: 1px solid #94a3b8;
-    }
-    .text-block {
+    .progress-dates {
       margin-top: 10px;
-      padding: 8px 11px;
-      border: 1px solid #e2e8f0;
-      border-radius: 6px;
-      background: #fcfcfd;
-      font-size: 11px;
+      font-size: 11.5px;
+      color: #475569;
     }
-    .footer-row {
+    .progress-dates div {
       display: flex;
       justify-content: space-between;
-      align-items: flex-end;
-      gap: 16px;
-      margin-top: 18px;
+      margin-top: 3px;
+    }
+    .totals-box {
+      width: 270px;
+      border: 1px solid #cbd5e1;
+      border-radius: 10px;
+      padding: 12px 14px;
+      background: #f8fafc;
+      flex-shrink: 0;
+    }
+    .tot-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 5px 0;
+      font-size: 13px;
+    }
+    .tot-row.grand {
+      border-top: 1.5px solid #0f172a;
+      margin-top: 6px;
       padding-top: 8px;
+      font-size: 14px;
+      font-weight: 800;
+    }
+    .paid-val { color: #15803d; font-weight: 700; }
+    .due-val { color: ${remaining > 0 ? '#dc2626' : '#15803d'}; font-weight: 800; }
+    .note {
+      margin-top: 14px;
+      padding: 10px 14px;
+      background: #fffbeb;
+      border: 1px solid #fde68a;
+      border-radius: 9px;
+      font-size: 12px;
+      color: #78350f;
+      break-inside: avoid;
+    }
+    .footer {
+      margin-top: 16px;
+      padding-top: 10px;
       border-top: 1px dashed #cbd5e1;
+      display: flex;
+      justify-content: space-between;
       font-size: 11px;
+      color: #64748b;
     }
-    .sign-col {
-      border-top: 1px solid #334155;
-      padding-top: 4px;
-      min-width: 140px;
+    @media print {
+      body { padding: 0; }
+      .sheet { border: 1px solid #cbd5e1; padding: 16px 18px; }
     }
-    .issued-col {
-      text-align: center;
-    }
-    .org-col {
-      text-align: right;
+    @media (max-width: 600px) {
+      .grid-2 { grid-template-columns: 1fr; }
+      .summary-wrap { flex-direction: column; }
+      .totals-box { width: 100%; }
+      .topbar { flex-direction: column; }
+      .doc-meta { text-align: left; }
+      .pill-row { justify-content: flex-start; }
     }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="box">
-      <div class="header-row">
-        <div>
-          <div class="company-am">ግሩም ዘመናዊ የኤሌክትሪክ እና ማገዶ ቆጣቢ ምጣድ</div>
-          <div class="company-en">GRUM STOVE &amp; MANUFACTURING</div>
-          <div class="company-lines">
-            <div>አዲስ አበባ · ቦሌ ክ/ከተማ</div>
-            <div>0924 254 988</div>
-            <div>0903 284 493</div>
-            <div>info@grumstove.com</div>
-          </div>
+  <div class="sheet">
+    <div class="topbar">
+      <div>
+        <h1 class="brand-title">የክፍያ ደረሰኝ</h1>
+        <div class="brand-sub">ቅርንጫፍ: <strong>${safe(branchName + branchCode)}</strong></div>
+      </div>
+      <div class="doc-meta">
+        <div class="receipt-code">${safe(receipt.receiptNumber || '—')}</div>
+        <div class="pill-row">
+          <span class="pill pill-status">${safe(statusObj.label)}</span>
+          <span class="pill" style="background:${paymentBadgeBg};color:${paymentBadgeColor};">${safe(paymentBadgeLabel)}</span>
         </div>
-        <div class="meta-right">
-          <div class="meta-lbl">ደረሰኝ ቁጥር</div>
-          <div class="meta-val">${esc(receiptNo)}</div>
-          <div class="meta-lbl">የተሰጠ ቀን</div>
-          <div class="meta-val">${esc(issuedEthDate)}</div>
-          <div class="status-tag">${esc(statusText)}</div>
-          <div class="meta-lbl">ቅርንጫፍ</div>
-          <div class="meta-val" style="margin-bottom:0">${esc(branchName)}</div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="box">
+        <div class="box-title">የደንበኛ መረጃ · Customer</div>
+        <div class="kv"><span class="k">ስም:</span><span class="v">${safe(receipt.customerName || '—')}</span></div>
+        <div class="kv"><span class="k">ስልክ:</span><span class="v mono">${safe(receipt.customerPhone || '—')}</span></div>
+      </div>
+      <div class="box">
+        <div class="box-title">የትዕዛዝ ዝርዝር · Reference</div>
+        <div class="kv"><span class="k">የትዕዛዝ ቁጥር:</span><span class="v mono">${safe(orderNum)}</span></div>
+        <div class="kv"><span class="k">የምርት ኮድ:</span><span class="v mono">${safe(receipt.productCode || '—')}</span></div>
+        <div class="kv"><span class="k">ያወጣው ሰራተኛ:</span><span class="v">${safe(issuedByName)}</span></div>
+      </div>
+    </div>
+
+    <table class="item-table">
+      <thead>
+        <tr>
+          <th>የዕቃ ዓይነት (Item)</th>
+          <th>የምርት ኮድ</th>
+          <th class="num">ጠቅላላ ዋጋ</th>
+          <th class="num">ቅድመ ክፍያ</th>
+          <th class="num">ቀሪ ክፍያ</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>${safe(receipt.itemType || '—')}</strong></td>
+          <td class="mono">${safe(receipt.productCode || '—')}</td>
+          <td class="num">${safe(formatETB(total))}</td>
+          <td class="num paid-val">${safe(formatETB(prepaid))}</td>
+          <td class="num due-val">${safe(formatETB(remaining))}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="summary-wrap">
+      <div class="progress-box">
+        <div class="progress-head">
+          <span>የክፍያ ሁኔታ (${paidRatio}%)</span>
+          <span>${safe(formatETB(prepaid))} / ${safe(formatETB(total))}</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill"></div>
+        </div>
+        <div class="progress-dates">
+          <div><span>የትዕዛዝ ቀን:</span><strong>${safe(orderDateEth)}</strong></div>
+          <div><span>ቀጠሮ ቀን:</span><strong>${safe(apptDateEth)}</strong></div>
+          <div><span>የታተመበት ቀን:</span><strong>${safe(issuedDateEth)}</strong></div>
         </div>
       </div>
 
-      <div class="block">
-        <div class="block-title">የደንበኛ መረጃ</div>
-        <div class="line-pair"><span>ስም</span><span>${esc(customerName)}</span></div>
-        <div class="line-pair"><span>ስልክ</span><span>${esc(customerPhone)}</span></div>
+      <div class="totals-box">
+        <div class="tot-row"><span>ጠቅላላ ዋጋ:</span><span>${safe(formatETB(total))}</span></div>
+        <div class="tot-row"><span>ቅድመ ክፍያ:</span><span class="paid-val">- ${safe(formatETB(prepaid))}</span></div>
+        <div class="tot-row grand"><span>ቀሪ ክፍያ:</span><span class="due-val">${safe(formatETB(remaining))}</span></div>
       </div>
+    </div>
 
-      <div class="block">
-        <div class="block-title">የትዕዛዝ ዝርዝር</div>
-        <table>
-          <thead>
-            <tr>
-              <th>ዕቃ</th>
-              <th>ኮድ</th>
-              <th class="c">ብዛት</th>
-              <th class="r">ዋጋ (ETB)</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>${esc(itemType)}</td>
-              <td>${esc(productCode)}</td>
-              <td class="c">${esc(qty)}</td>
-              <td class="r">${esc(fmtAmount(totalPrice))}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+    ${receipt.note ? `<div class="note"><strong>ማስታወሻ:</strong> ${safe(receipt.note)}</div>` : ''}
 
-      <div class="summary-box">
-        <div class="dates-side">
-          <div class="line-pair"><span>የትዕዛዝ ቀን</span><span>${esc(orderEthDate)}</span></div>
-          <div class="line-pair"><span>ቀጠሮ ቀን</span><span>${esc(appointmentEthDate)}</span></div>
-        </div>
-        <div class="amounts-side">
-          <div class="amt-row"><span>ጠቅላላ ዋጋ</span><span>ብር ${esc(fmtAmount(totalPrice))}</span></div>
-          <div class="amt-row"><span>ቅድመ ክፍያ</span><span>ብር ${esc(fmtAmount(prepayment))}</span></div>
-          <div class="amt-row last"><span>ቀሪ ክፍያ</span><span>ብር ${esc(fmtAmount(remaining))}</span></div>
-        </div>
-      </div>
-
-      ${noteText ? `
-      <div class="text-block">
-        <div class="block-title">ማስታወሻ</div>
-        <div>${esc(noteText)}</div>
-      </div>` : ''}
-
-      <div class="text-block">
-        <div class="block-title">ማሳሰቢያ</div>
-        <div>የተከፈለው ቅድመ ክፍያ (ክብድ) የቆይታ ጊዜው 2 ወር ነው። በዚሁ ጊዜ ውስጥ ዕቃውን ካልተረከቡ ወይም የጥሬ ዕቃ ዋጋ ጭማሪ ካጋጠመ፣ የዋጋው ልዩነት ታስቦ የሚስተካከል መሆኑን እንገልጻለን።</div>
-        <div style="margin-top:6px">0924254988/0903284493</div>
-        <div>ስለመረጡን እናመሰግናለን!</div>
-      </div>
-
-      <div class="footer-row">
-        <div class="sign-col">የደንበኛ ፊርማ</div>
-        <div class="issued-col">
-          <div>ደረሰኝ በ ${esc(issuedByName)} ተዘጋጅቷል</div>
-          <div class="meta-lbl">${esc(issuedByName)} /ISSUED BY</div>
-        </div>
-        <div class="org-col">
-          <div>${esc(issuedEthDate)}</div>
-          <div>GRUM STOVE ADDIS ABABA</div>
-        </div>
-      </div>
+    <div class="footer">
+      <span>${safe(branchName)} · የክፍያ ማረጋገጫ ደረሰኝ</span>
+      <span>${safe(receipt.receiptNumber || '')}</span>
     </div>
   </div>
 </body>
 </html>`;
+}
+
+function ReceiptView({ receipt, onPrint, onDownload }) {
+  const status = RECEIPT_STATUS[receipt.status] || { label: receipt.status, color: 'gray' };
+  const remaining = Number(receipt.remainingPayment) || 0;
+
+  return (
+    <div className="space-y-4 text-sm">
+      <div className="flex items-start justify-between pb-3 border-b border-gray-100">
+        <div>
+          <p className="font-mono text-xs text-brand font-semibold">{receipt.receiptNumber}</p>
+          <p className="font-bold text-gray-900 text-lg mt-0.5">{receipt.customerName}</p>
+          {receipt.customerPhone && (
+            <p className="text-xs text-gray-500">{receipt.customerPhone}</p>
+          )}
+        </div>
+        <Badge color={status.color}>{status.label}</Badge>
+      </div>
+
+      <div className="space-y-2.5">
+        <Row label="የዕቃ ዓይነት" value={receipt.itemType} bold />
+        {receipt.productCode && <Row label="የምርት ኮድ" value={receipt.productCode} mono />}
+        {receipt.order?.orderNumber && <Row label="የትዕዛዝ ቁጥር" value={receipt.order.orderNumber} mono />}
+        <Row label="ጠቅላላ ዋጋ" value={formatETB(receipt.totalPrice || 0)} bold />
+        <Row label="ቅድመ ክፍያ" value={formatETB(receipt.prepayment || 0)} color="text-emerald-600" bold />
+        <Row label="ቀሪ ክፍያ" value={formatETB(remaining)} color={remaining > 0 ? 'text-red-600' : 'text-emerald-600'} bold />
+        <Row label="ቀጠሮ ቀን" value={formatEthiopianDate(receipt.appointmentDate)} />
+        <Row label="የተፈጠረበት ቀን" value={formatEthiopianDate(receipt.createdAt)} />
+        <Row label="ቅርንጫፍ" value={receipt.branch?.name || '—'} />
+      </div>
+
+      {receipt.note && (
+        <div className="p-3 rounded-xl bg-amber-50 border border-amber-200/70 text-xs text-amber-900">
+          {receipt.note}
+        </div>
+      )}
+
+      <div className="flex gap-2 pt-3 border-t border-gray-100">
+        <Button type="button" variant="outline" onClick={onPrint} className="flex-1 justify-center">
+          <Printer size={16} /> አትም
+        </Button>
+        <Button type="button" onClick={onDownload} className="flex-1 justify-center">
+          <Download size={16} /> PDF አውርድ
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function FormField({ label, children, full }) {
+  return (
+    <div className={full ? 'md:col-span-2' : ''}>
+      <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+      {children}
+    </div>
+  );
+}
+
+function Row({ label, value, mono, bold, color }) {
+  return (
+    <div className="flex justify-between gap-3">
+      <span className="text-gray-500 flex-shrink-0">{label}:</span>
+      <span
+        className={`text-right ${bold ? 'font-semibold' : ''} ${
+          mono ? 'font-mono text-xs' : ''
+        } ${color || 'text-gray-800'}`}
+      >
+        {value}
+      </span>
+    </div>
+  );
 }

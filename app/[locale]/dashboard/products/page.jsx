@@ -272,6 +272,8 @@ function EthiopianDateInput({ value, onChange, required = false, placeholder = '
   );
 }
 
+const STAFF_ROLES = ['seller', 'cashier', 'storekeeper'];
+
 export default function ProductsPage() {
   const { user } = useAuth();
 
@@ -290,7 +292,9 @@ export default function ProductsPage() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
-  const canManage = user?.role === 'admin' || user?.role === 'seller';
+  const isAdminActor = user?.role === 'admin' || user?.role === 'owner';
+  const isStaffActor = STAFF_ROLES.includes(user?.role);
+  const canManage = isAdminActor || isStaffActor;
 
   useEffect(() => {
     let cancelled = false;
@@ -317,16 +321,16 @@ export default function ProductsPage() {
 
   const userBranchId = useMemo(() => {
     if (!user?.branch) return null;
-    return typeof user.branch === 'object' ? user.branch._id : user.branch;
+    return String(typeof user.branch === 'object' ? user.branch._id : user.branch);
   }, [user]);
 
   const roleFiltered = useMemo(() => {
     let result = products;
-    if (user?.role === 'seller' && userBranchId) {
-      result = result.filter((p) => (p.branch?._id || p.branch) === userBranchId);
+    if (isStaffActor && userBranchId) {
+      result = result.filter((p) => String(p.branch?._id || p.branch) === userBranchId);
     }
     return result;
-  }, [products, user, userBranchId]);
+  }, [products, isStaffActor, userBranchId]);
 
   const filtered = useMemo(() => {
     return roleFiltered.filter((p) => {
@@ -362,6 +366,21 @@ export default function ProductsPage() {
     const totalProfit = totalSellingValue - totalPurchaseCost;
     return { total, totalSellingValue, totalPurchaseCost, totalProfit };
   }, [roleFiltered]);
+
+  const canActorModifyProduct = (product) => {
+    if (!product) return canManage;
+    if (isAdminActor) return true;
+    if (!isStaffActor) return false;
+    const productBranchId = product.branch?._id
+      ? String(product.branch._id)
+      : product.branch
+      ? String(product.branch)
+      : null;
+    if (userBranchId && productBranchId) {
+      return productBranchId === userBranchId;
+    }
+    return true;
+  };
 
   const handleDeleteClick = (product) => setDeleteTarget(product);
 
@@ -432,7 +451,7 @@ export default function ProductsPage() {
           <p className="text-sm text-stone-500 mt-1">
             {filtered.length} ምርቶች · {formatETB(stats.totalSellingValue)} ጠቅላላ የሽያጭ ዋጋ
           </p>
-          {user?.role === 'seller' && userBranchId && (
+          {isStaffActor && userBranchId && (
             <p className="text-xs text-amber-800 font-medium mt-1 flex items-center gap-1">
               <Building2 size={12} />
               {typeof user.branch === 'object' ? user.branch.name : 'ቅርንጫፍ'}
@@ -505,7 +524,7 @@ export default function ProductsPage() {
               </option>
             ))}
           </select>
-          {user?.role === 'admin' ? (
+          {isAdminActor ? (
             <select
               value={branchFilter}
               onChange={(e) => setBranchFilter(e.target.value)}
@@ -568,6 +587,7 @@ export default function ProductsPage() {
               ) : (
                 filtered.map((product) => {
                   const profit = (product.sellingPrice || 0) - (product.unitPrice || 0);
+                  const rowCanModify = canActorModifyProduct(product);
                   return (
                     <tr
                       key={product._id}
@@ -618,8 +638,8 @@ export default function ProductsPage() {
                             setShowModal(true);
                           }}
                           onDelete={() => handleDeleteClick(product)}
-                          canEdit={canManage}
-                          canDelete={canManage}
+                          canEdit={rowCanModify}
+                          canDelete={rowCanModify}
                         />
                       </td>
                     </tr>
@@ -694,10 +714,10 @@ function StatCard({ label, value, icon: Icon, color }) {
 }
 
 function ProductForm({ product, branches, onSave, onCancel, currentUser }) {
-  const isSeller = currentUser?.role === 'seller';
+  const isStaff = STAFF_ROLES.includes(currentUser?.role);
 
   const defaultBranch =
-    isSeller && currentUser?.branch
+    isStaff && currentUser?.branch
       ? typeof currentUser.branch === 'object'
         ? currentUser.branch._id
         : currentUser.branch
@@ -823,7 +843,7 @@ function ProductForm({ product, branches, onSave, onCancel, currentUser }) {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <FormField label="ቅርንጫፍ *">
-          {isSeller ? (
+          {isStaff ? (
             <div className="w-full px-3 py-2 rounded-lg bg-amber-50 text-amber-900 text-sm font-medium">
               {typeof currentUser.branch === 'object'
                 ? currentUser.branch?.name
@@ -926,83 +946,47 @@ function ProductView({ product }) {
       : 0;
 
   return (
-    <div>
-      <div className="flex items-center gap-3 pb-4 border-b border-stone-100">
-        <div className="w-14 h-14 rounded-xl bg-amber-100/80 flex items-center justify-center">
-          <ShoppingCart size={28} className="text-amber-800" />
-        </div>
+    <div className="space-y-4 text-sm">
+      <div className="flex items-start justify-between pb-3 border-b border-stone-100">
         <div>
-          <p className="font-bold text-stone-900 text-lg">{product.name}</p>
-          <p className="text-sm text-stone-500 font-mono">{product.code}</p>
+          <p className="font-mono text-xs text-amber-800 font-semibold">{product.code}</p>
+          <p className="font-bold text-stone-900 text-lg mt-0.5">{product.name}</p>
+          {product.category && (
+            <p className="text-xs text-stone-500 mt-0.5">{product.category}</p>
+          )}
         </div>
+        <Badge color={status.color}>{status.label}</Badge>
       </div>
 
-      <div className="grid grid-cols-3 gap-2 py-4">
-        <StatBox
-          label="ብዛት"
-          value={(product.quantity || 0) + ' ' + (product.unit || 'pcs')}
-          icon={Package}
-          color="text-amber-800 bg-amber-50"
-        />
-        <StatBox
-          label="የመሸጫ"
-          value={formatETB(product.sellingPrice || 0)}
-          icon={DollarSign}
-          color="text-stone-800 bg-stone-100"
-        />
-        <StatBox
-          label="ትርፍ"
-          value={formatETB(profit)}
-          icon={TrendingUp}
-          color="text-emerald-700 bg-emerald-50"
-        />
-      </div>
+      {product.description && (
+        <p className="text-stone-600 bg-stone-50 p-3 rounded-lg">{product.description}</p>
+      )}
 
-      <div className="space-y-3 pt-3 border-t border-stone-100 text-sm">
-        <Row label="ምድብ" value={product.category} />
-        <Row label="መግለጫ" value={product.description || '-'} />
+      <div className="space-y-2.5">
+        <Row label="ብዛት" value={`${product.quantity} ${product.unit || 'pcs'}`} bold />
         <Row label="የመግዣ ዋጋ" value={formatETB(product.unitPrice || 0)} />
+        <Row label="የመሸጫ ዋጋ" value={formatETB(product.sellingPrice || 0)} bold />
         <Row
-          label="ትርፍ መጠን"
-          value={profitMargin + '%'}
-          bold
+          label="ትርፍ (በአንዱ)"
+          value={`${profit < 0 ? '-' : '+'}${formatETB(Math.abs(profit))} (${profitMargin}%)`}
           color={profit < 0 ? 'text-red-600' : 'text-emerald-700'}
+          bold
         />
-        <Row label="ቅርንጫፍ" value={product.branch?.name || '-'} icon={Building2} />
-        <Row label="የተፈጠረ" value={formatEthiopianDate(product.createdAt)} icon={Calendar} />
-        <Row label="የፈጠረ" value={product.createdBy?.fullName || '-'} icon={User} />
-        <div className="flex justify-between items-center">
-          <span className="text-stone-500">ሁኔታ:</span>
-          <Badge color={status.color}>{status.label}</Badge>
-        </div>
+        <Row label="ቅርንጫፍ" value={product.branch?.name || '-'} />
+        <Row label="ቀን" value={formatEthiopianDate(product.createdAt)} />
       </div>
     </div>
   );
 }
 
-function StatBox({ label, value, icon: Icon, color }) {
-  const parts = color.split(' ');
-  return (
-    <div className={'rounded-lg p-2.5 text-center ' + parts[1]}>
-      <div className="flex items-center justify-center mb-1">
-        <Icon size={16} className={parts[0]} />
-      </div>
-      <p className="text-xs font-bold text-stone-900">{value}</p>
-      <p className="text-[10px] text-stone-500">{label}</p>
-    </div>
-  );
-}
-
-function Row({ label, value, icon: Icon, bold, color }) {
+function Row({ label, value, mono, bold, color }) {
   return (
     <div className="flex justify-between gap-3">
-      <span className="text-stone-500 flex-shrink-0 flex items-center gap-1">
-        {Icon && <Icon size={12} />} {label}:
-      </span>
+      <span className="text-stone-500 flex-shrink-0">{label}:</span>
       <span
-        className={
-          'text-right ' + (bold ? 'font-semibold ' : '') + (color || 'text-stone-800')
-        }
+        className={`text-right ${bold ? 'font-semibold' : ''} ${
+          mono ? 'font-mono text-xs' : ''
+        } ${color || 'text-stone-800'}`}
       >
         {value}
       </span>

@@ -5,9 +5,9 @@ import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/components/providers/AuthProvider';
 import {
   Plus, Search, Wallet, DollarSign, Calendar, CreditCard,
-  Banknote, Building2, User, Loader2,
+  Banknote, Building2, User, Loader2, ArrowLeftRight, Tag,
 } from 'lucide-react';
-import { formatETB, formatDate } from '@/lib/utils';
+import { formatETB } from '@/lib/utils';
 import Card from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
@@ -16,70 +16,294 @@ import ConfirmModal from '@/components/ui/ConfirmModal';
 import ActionButtons from '@/components/ui/ActionButtons';
 import toast from 'react-hot-toast';
 
-const T = {
-  expenses:        '\u12C8\u132A\u12CE\u127D',
-  total:           '\u1320\u1245\u120B\u120B',
-  totalAmount:     '\u1320\u1245\u120B\u120B \u12C8\u132A',
-  newExpense:      '\u12A0\u12F2\u1235 \u12C8\u132A',
-  cash:            '\u1325\u122C \u1308\u1295\u12D8\u1265',
-  nonCash:         '\u12EB\u120D\u1206\u1290 \u1325\u122C',
-  search:          '\u1348\u120D\u130D (\u1218\u130D\u1208\u132B)...',
-  allCategories:   '\u1201\u1209\u121D \u121D\u12F5\u1266\u127D',
-  allPayments:     '\u1201\u1209\u121D \u12E8\u12AD\u134D\u12EB \u12D8\u12F4\u12CE\u127D',
-  allBranches:     '\u1201\u1209\u121D \u1245\u122D\u1295\u132B\u134E\u127D',
-  branch:          '\u1245\u122D\u1295\u132B\u134D',
-  description:     '\u1218\u130D\u1208\u132B',
-  paidTo:          '\u12E8\u1270\u12A8\u1348\u1208\u1260\u1275 \u1230\u12CD',
-  category:        '\u121D\u12F5\u1265',
-  amount:          '\u1218\u1320\u1295',
-  paymentMethod:   '\u12E8\u12AD\u134D\u12EB \u12D8\u12F4',
-  date:            '\u1240\u1295',
-  action:          '\u1270\u130D\u1263\u122D',
-  noData:          '\u121D\u1295\u121D \u12C8\u132A \u12A0\u120D\u1270\u1308\u1298\u121D',
-  loading:         '\u1260\u1218\u132B\u1295 \u120B\u12ED...',
-  error:           '\u1235\u1205\u1270\u1275 \u1270\u1348\u1325\u122F\u120D',
-  retry:           '\u12A5\u1295\u12F0\u1308\u1293 \u121E\u12AD\u122D',
-  required:        '\u12A0\u1235\u1348\u120D\u130B\u120D',
-  amountLabel:     '\u1218\u1320\u1295:',
-  optional:        '\u121B\u1323\u1240\u122B',
-  refPlaceholder:  '\u121D\u1233\u120C: \u12F0\u1228\u1230\u129D \u1241\u1325\u122D',
-  descPlaceholder: '\u121D\u1233\u120C: \u12E8\u1262\u122E \u12AA\u122B\u12ED',
-  paidPlaceholder: '\u121D\u1233\u120C: \u12A0\u1260\u1260 \u12A8\u1260\u12F0',
-  cancel:          '\u1230\u122D\u12DD',
-  save:            '\u1308\u121D\u122D',
-  update:          '\u12A0\u1235\u1270\u12AB\u12AD\u120D',
-  deleteTitle:     '\u12C8\u132A \u12ED\u1230\u1228\u12DD?',
-  deleteMsg:       '\u12ED\u1205\u1295 \u12C8\u132A \u1218\u1230\u1228\u12DD \u12ED\u1348\u120D\u130B\u1209?',
-  confirmDelete:   '\u12A0\u12CE\u1363 \u1230\u122D\u12DD',
-  keep:            '\u1270\u12C8\u12CD',
-  branchReq:       '\u1245\u122D\u1295\u132B\u134D \u12ED\u121D\u1228\u1321',
-  successAdd:      '\u12C8\u132A \u1270\u1328\u121D\u122F\u120D',
-  successUpdate:   '\u12C8\u132A \u1270\u1235\u1270\u12AB\u12AD\u120F\u120D',
-  successDelete:   '\u12C8\u132A \u1270\u1230\u122D\u12DF\u120D',
-  createErr:       '\u1235\u1205\u1270\u1275 \u1270\u1348\u1325\u122F\u120D',
-  branchNotFound:  '\u1245\u122D\u1295\u132B\u134D \u12DD\u122D\u12DD\u120D \u12A0\u120D\u1270\u1308\u1298\u121D \u2014 /api/branches \u12EB\u1235\u1348\u120D\u130B\u120D',
+const ETHIOPIAN_TIME_ZONE = 'Africa/Addis_Ababa';
+
+const ETHIOPIAN_MONTHS = [
+  { value: 1,  label: 'መስከረም' },
+  { value: 2,  label: 'ጥቅምት' },
+  { value: 3,  label: 'ኅዳር' },
+  { value: 4,  label: 'ታኅሣሥ' },
+  { value: 5,  label: 'ጥር' },
+  { value: 6,  label: 'የካቲት' },
+  { value: 7,  label: 'መጋቢት' },
+  { value: 8,  label: 'ሚያዝያ' },
+  { value: 9,  label: 'ግንቦት' },
+  { value: 10, label: 'ሰኔ' },
+  { value: 11, label: 'ሐምሌ' },
+  { value: 12, label: 'ነሐሴ' },
+  { value: 13, label: 'ጳጉሜን' },
+];
+
+const ETHIOPIAN_WEEKDAYS_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+const formatEthiopianDate = (date) => {
+  if (!date) return '—';
+  const d = date instanceof Date ? date : new Date(date);
+  if (isNaN(d.getTime())) return '—';
+  try {
+    return new Intl.DateTimeFormat('am-ET-u-ca-ethiopic', {
+      timeZone: ETHIOPIAN_TIME_ZONE,
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    }).format(d);
+  } catch (e) {
+    return d.toLocaleDateString('am-ET', { timeZone: ETHIOPIAN_TIME_ZONE });
+  }
 };
 
-const CATEGORIES = [
-  { value: 'purchase',    label: '\u130D\u12DA' },
-  { value: 'salary',      label: '\u12F0\u1218\u12C8\u12DD' },
-  { value: 'rent',        label: '\u12AA\u122B\u12ED' },
-  { value: 'utilities',   label: '\u1218\u1308\u120D\u1308\u120B' },
-  { value: 'transport',   label: '\u1275\u122B\u1295\u1235\u133E\u122D\u1275' },
-  { value: 'maintenance', label: '\u1325\u1308\u1293' },
-  { value: 'marketing',   label: '\u121B\u122D\u12AC\u1272\u1295\u130D' },
-  { value: 'other',       label: '\u120C\u120B' },
-];
+function toUtcNoonDate(isoStr) {
+  if (!isoStr) return new Date(NaN);
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(isoStr).trim());
+  if (match) {
+    return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12, 0, 0));
+  }
+  const d = new Date(isoStr);
+  if (isNaN(d.getTime())) return new Date(NaN);
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 12, 0, 0));
+}
+
+function toIsoDateFromUtc(date) {
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(date.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function getEthDateParts(isoStr) {
+  const date = toUtcNoonDate(isoStr);
+  if (isNaN(date.getTime())) return null;
+
+  const weekdayStr = new Intl.DateTimeFormat('en-US', {
+    timeZone: ETHIOPIAN_TIME_ZONE,
+    weekday: 'short',
+  }).format(date);
+  const dow = ETHIOPIAN_WEEKDAYS_EN.indexOf(weekdayStr);
+
+  try {
+    const parts = new Intl.DateTimeFormat('en-u-ca-ethiopic', {
+      timeZone: ETHIOPIAN_TIME_ZONE,
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+    }).formatToParts(date);
+
+    const year = Number(parts.find((p) => p.type === 'year')?.value);
+    const month = Number(parts.find((p) => p.type === 'month')?.value);
+    const day = Number(parts.find((p) => p.type === 'day')?.value);
+    if (year && month && day) {
+      return { year, month, day, dow: dow >= 0 ? dow : 0 };
+    }
+  } catch (e) {
+    // Fallback handled below
+  }
+  return null;
+}
+
+function ethToGregorianIso(ethYear, ethMonth, ethDay) {
+  const isLeap = (ethYear + 1) % 4 === 0;
+  const maxDay = ethMonth === 13 ? (isLeap ? 6 : 5) : 30;
+  const clampedDay = Math.min(Math.max(1, ethDay), maxDay);
+
+  let gYear = ethYear + 7;
+  let gMonth = ethMonth + 8;
+  if (gMonth > 12) {
+    gMonth -= 12;
+    gYear += 1;
+  }
+
+  const candidate = new Date(Date.UTC(gYear, gMonth - 1, Math.min(clampedDay + 10, 28), 12, 0, 0));
+  for (let i = -15; i <= 15; i++) {
+    const test = new Date(candidate.getTime() + i * 86400000);
+    const p = getEthDateParts(toIsoDateFromUtc(test));
+    if (p && p.year === ethYear && p.month === ethMonth && p.day === clampedDay) {
+      return toIsoDateFromUtc(test);
+    }
+  }
+  return toIsoDateFromUtc(candidate);
+}
+
+function getEthMonthDays(ethYear, ethMonth) {
+  const isLeap = (ethYear + 1) % 4 === 0;
+  const totalDays = ethMonth === 13 ? (isLeap ? 6 : 5) : 30;
+  const days = [];
+  for (let d = 1; d <= totalDays; d++) {
+    const iso = ethToGregorianIso(ethYear, ethMonth, d);
+    const parts = getEthDateParts(iso);
+    days.push({ day: d, iso, dow: parts ? parts.dow : 0 });
+  }
+  return days;
+}
+
+function EthiopianDateInput({ value, onChange, required = false }) {
+  const initialParts = useMemo(() => {
+    const p = getEthDateParts(value);
+    return p || { year: 2019, month: 3, day: 13, dow: 0 };
+  }, [value]);
+
+  const [open, setOpen] = useState(false);
+  const [viewYear, setViewYear] = useState(initialParts.year);
+  const [viewMonth, setViewMonth] = useState(initialParts.month);
+
+  useEffect(() => {
+    const p = getEthDateParts(value);
+    if (p) {
+      setViewYear(p.year);
+      setViewMonth(p.month);
+    }
+  }, [value]);
+
+  const monthDays = useMemo(() => getEthMonthDays(viewYear, viewMonth), [viewYear, viewMonth]);
+  const leadingBlanks = monthDays.length > 0 ? monthDays[0].dow : 0;
+
+  const selectDate = (iso) => {
+    onChange(iso);
+    setOpen(false);
+  };
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full px-3 py-2 border border-gray-200 rounded-xl bg-white hover:border-sky-300 hover:bg-sky-50/50 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand text-sm text-gray-800 flex items-center justify-between gap-2 text-left transition"
+      >
+        <span className={value ? 'text-gray-800 font-medium' : 'text-gray-400'}>
+          {value ? formatEthiopianDate(`${value}T12:00:00`) : 'የኢትዮጵያ ቀን ይምረጡ'}
+        </span>
+        <Calendar size={15} className="text-gray-400 flex-shrink-0" />
+      </button>
+      {required && (
+        <input
+          type="text"
+          tabIndex={-1}
+          aria-hidden="true"
+          value={value || ''}
+          onChange={() => {}}
+          required
+          className="sr-only"
+        />
+      )}
+
+      {open && (
+        <div className="absolute z-30 mt-1.5 w-72 bg-white border border-gray-200 rounded-2xl shadow-xl p-3">
+          <div className="flex items-center justify-between gap-2 mb-2.5">
+            <select
+              value={viewMonth}
+              onChange={(e) => setViewMonth(Number(e.target.value))}
+              className="px-2.5 py-1 border border-gray-200 rounded-lg text-xs font-semibold text-gray-800 bg-gray-50 focus:outline-none focus:ring-1 focus:ring-brand"
+            >
+              {ETHIOPIAN_MONTHS.map((m) => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
+            <input
+              type="number"
+              value={viewYear}
+              onChange={(e) => setViewYear(Number(e.target.value) || 2019)}
+              className="w-20 px-2 py-1 border border-gray-200 rounded-lg text-xs font-semibold text-gray-800 bg-gray-50 focus:outline-none focus:ring-1 focus:ring-brand"
+            />
+          </div>
+
+          <div className="grid grid-cols-7 text-center text-[10px] font-semibold text-gray-400 mb-1">
+            <span>እሑድ</span>
+            <span>ሰኞ</span>
+            <span>ማክሰ</span>
+            <span>ረቡዕ</span>
+            <span>ሐሙስ</span>
+            <span>ዓርብ</span>
+            <span>ቅዳሜ</span>
+          </div>
+
+          <div className="grid grid-cols-7 gap-1 text-center text-xs">
+            {Array.from({ length: leadingBlanks }).map((_, idx) => (
+              <span key={`b-${idx}`} />
+            ))}
+            {monthDays.map((d) => {
+              const isSelected = value === d.iso;
+              return (
+                <button
+                  key={d.day}
+                  type="button"
+                  onClick={() => selectDate(d.iso)}
+                  className={`h-7 w-full rounded-lg text-xs font-medium transition ${
+                    isSelected
+                      ? 'bg-brand text-white font-bold shadow-sm'
+                      : 'text-gray-700 hover:bg-sky-50 hover:text-sky-700'
+                  }`}
+                >
+                  {d.day}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-gray-100 text-xs">
+            <button
+              type="button"
+              onClick={() => selectDate(toIsoDateFromUtc(new Date()))}
+              className="text-brand font-semibold hover:underline"
+            >
+              ዛሬ
+            </button>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="text-gray-500 hover:text-gray-700 font-medium"
+            >
+              ዝጋ
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const T = {
+  expenses:         '\u12C8\u132A\u12CE\u127D',
+  total:            '\u1320\u1245\u120B\u120B',
+  totalAmount:      '\u1320\u1245\u120B\u120B \u12C8\u132A',
+  newExpense:       '\u12A0\u12F2\u1235 \u12C8\u132A',
+  cash:             '\u1325\u122C \u1308\u1295\u12D8\u1265',
+  transfer:         '\u12DD\u12CD\u12CD\u122A',
+  nonCash:          '\u12EB\u120D\u1206\u1290 \u1325\u122C',
+  search:           '\u1348\u120D\u130D (\u12E8\u1263\u1208\u1264\u1275 \u1235\u121D\u1363 \u121D\u12AD\u129D\u12EB\u1275)...',
+  allReasons:       '\u1201\u1209\u121D \u121D\u12AD\u129D\u12EB\u1275',
+  allPayments:      '\u1201\u1209\u121D \u12E8\u12AD\u134D\u12EB \u12D8\u12F4\u12CE\u127D',
+  allBranches:      '\u1201\u1209\u121D \u1245\u122D\u1295\u132B\u134E\u127D',
+  branch:           '\u1245\u122D\u1295\u132B\u134D',
+  ownerName:        '\u12E8\u1263\u1208\u1264\u1275 \u1235\u121D',
+  reason:           '\u12E8\u1270\u12A8\u1348\u1208\u1260\u1275 \u121D\u12AD\u129D\u12EB\u1275',
+  amount:           '\u1218\u1320\u1295',
+  paymentMethod:    '\u12E8\u12AD\u134D\u12EB \u12D8\u12F4',
+  date:             '\u1240\u1295',
+  action:           '\u1270\u130D\u1263\u122D',
+  noData:           '\u121D\u1295\u121D \u12C8\u132A \u12A0\u120D\u1270\u1308\u1298\u121D',
+  loading:          '\u1260\u1218\u132B\u1295 \u120B\u12ED...',
+  error:            '\u1235\u1205\u1270\u1275 \u1270\u1348\u1325\u122F\u120D',
+  retry:            '\u12A5\u1295\u12F0\u1308\u1293 \u121E\u12AD\u122D',
+  ownerPlaceholder: '\u121D\u1233\u120C: \u12A0\u1260\u1260 \u12A8\u1260\u12F0',
+  reasonPlaceholder:'\u121D\u1233\u120C: \u12E8\u1262\u122E \u12AA\u122B\u12ED',
+  cancel:           '\u1230\u122D\u12DD',
+  save:             '\u1308\u121D\u122D',
+  update:           '\u12A0\u1235\u1270\u12AB\u12AD\u120D',
+  deleteTitle:      '\u12C8\u132A \u12ED\u1230\u1228\u12DD?',
+  deleteMsg:        '\u12ED\u1205\u1295 \u12C8\u132A \u1218\u1230\u1228\u12DD \u12ED\u1348\u120D\u130B\u1209?',
+  confirmDelete:    '\u12A0\u12CE\u1363 \u1230\u122D\u12DD',
+  keep:             '\u1270\u12C8\u12CD',
+  branchReq:        '\u1245\u122D\u1295\u132B\u134D \u12ED\u121D\u1228\u1321',
+  successAdd:       '\u12C8\u132A \u1270\u1328\u121D\u122F\u120D',
+  successUpdate:    '\u12C8\u132A \u1270\u1235\u1270\u12AB\u12AD\u120F\u120D',
+  successDelete:    '\u12C8\u132A \u1270\u1230\u122D\u12DF\u120D',
+  createErr:        '\u1235\u1205\u1270\u1275 \u1270\u1348\u1325\u122F\u120D',
+  branchNotFound:   '\u1245\u122D\u1295\u132B\u134D \u12DD\u122D\u12DD\u120D \u12A0\u120D\u1270\u1308\u1298\u121D \u2014 /api/branches \u12EB\u1235\u1348\u120D\u130B\u120D',
+};
 
 const PAYMENT_METHODS = {
   cash:     { label: '\u1325\u122C \u1308\u1295\u12D8\u1265', color: 'green' },
-  bank:     { label: '\u1263\u1295\u12AD',       color: 'blue' },
-  telebirr: { label: '\u1274\u120C\u1265\u122D',    color: 'purple' },
-  cbe_birr: { label: '\u1232\u1262\u12A2 \u1265\u122D', color: 'purple' },
-  other:    { label: '\u120C\u120B',             color: 'gray' },
+  transfer: { label: '\u12DD\u12CD\u12CD\u122A',           color: 'blue'  },
 };
-
-const categoryLabel = (v) => CATEGORIES.find((c) => c.value === v)?.label || v;
 
 export default function ExpensesPage() {
   const { user } = useAuth();
@@ -89,7 +313,7 @@ export default function ExpensesPage() {
   const [fetchError, setFetchError] = useState(null);
   const [search, setSearch] = useState('');
   const [paymentFilter, setPaymentFilter] = useState('all');
-  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [reasonFilter, setReasonFilter] = useState('all');
   const [branchFilter, setBranchFilter] = useState('all');
   const [showModal, setShowModal] = useState(false);
   const [editingExpense, setEditingExpense] = useState(null);
@@ -106,7 +330,8 @@ export default function ExpensesPage() {
   }, [user]);
 
   const loadExpenses = async () => {
-    setLoading(true); setFetchError(null);
+    setLoading(true);
+    setFetchError(null);
     try {
       const data = await apiFetch('/expenses');
       setExpenses(Array.isArray(data) ? data : []);
@@ -116,6 +341,7 @@ export default function ExpensesPage() {
       setLoading(false);
     }
   };
+
   useEffect(() => { loadExpenses(); }, []);
   useEffect(() => {
     apiFetch('/branches').then((d) => setBranches(Array.isArray(d) ? d : [])).catch(() => setBranches([]));
@@ -129,19 +355,24 @@ export default function ExpensesPage() {
     });
   }, [expenses, user, userBranchId]);
 
+  const uniqueReasons = useMemo(() => {
+    const s = new Set(roleFiltered.map((e) => e.reason || e.category || e.description).filter(Boolean));
+    return [...s];
+  }, [roleFiltered]);
+
   const filtered = useMemo(() => {
     return roleFiltered.filter((e) => {
       const q = search.toLowerCase();
-      const matchSearch = (e.description || '').toLowerCase().includes(q)
-        || (e.paidTo || '').toLowerCase().includes(q)
-        || (e.reference || '').toLowerCase().includes(q);
+      const ownerVal = (e.paidTo || e.ownerName || '').toLowerCase();
+      const reasonVal = (e.reason || e.category || e.description || '').toLowerCase();
+      const matchSearch = ownerVal.includes(q) || reasonVal.includes(q);
       const matchPayment = paymentFilter === 'all' || e.paymentMethod === paymentFilter;
-      const matchCategory = categoryFilter === 'all' || e.category === categoryFilter;
+      const matchReason = reasonFilter === 'all' || (e.reason || e.category || e.description) === reasonFilter;
       const bid = typeof e.branch === 'object' ? e.branch?._id : e.branch;
       const matchBranch = branchFilter === 'all' || String(bid) === String(branchFilter);
-      return matchSearch && matchPayment && matchCategory && matchBranch;
+      return matchSearch && matchPayment && matchReason && matchBranch;
     });
-  }, [roleFiltered, search, paymentFilter, categoryFilter, branchFilter]);
+  }, [roleFiltered, search, paymentFilter, reasonFilter, branchFilter]);
 
   const stats = useMemo(() => {
     const total = roleFiltered.length;
@@ -154,18 +385,49 @@ export default function ExpensesPage() {
     setSaving(true);
     try {
       if (editingExpense) {
-        const updated = await apiFetch(`/expenses/${editingExpense._id}`, { method: 'PATCH', body: JSON.stringify(data) });
-        setExpenses((prev) => prev.map((e) => (e._id === editingExpense._id ? { ...e, ...updated } : e)));
+        const updated = await apiFetch(`/expenses/${editingExpense._id}`, {
+          method: 'PATCH',
+          body: JSON.stringify(data),
+        });
+
+        const matchedBranch =
+          branches.find((b) => String(b._id) === String(updated?.branch?._id || updated?.branch || data.branch)) ||
+          (typeof updated?.branch === 'object' ? updated.branch : null) ||
+          editingExpense.branch;
+
+        const normalizedUpdated = {
+          ...editingExpense,
+          ...updated,
+          branch: matchedBranch || updated?.branch || data.branch,
+        };
+
+        setExpenses((prev) =>
+          prev.map((e) => (e._id === editingExpense._id ? normalizedUpdated : e))
+        );
         toast.success(T.successUpdate);
       } else {
-        const created = await apiFetch('/expenses', { method: 'POST', body: JSON.stringify(data) });
-        setExpenses((prev) => [created, ...prev]);
+        const created = await apiFetch('/expenses', {
+          method: 'POST',
+          body: JSON.stringify(data),
+        });
+
+        const matchedBranch =
+          branches.find((b) => String(b._id) === String(created?.branch?._id || created?.branch || data.branch)) ||
+          (typeof created?.branch === 'object' ? created.branch : null);
+
+        setExpenses((prev) => [
+          { ...created, branch: matchedBranch || created?.branch || data.branch },
+          ...prev,
+        ]);
         toast.success(T.successAdd);
       }
-      setShowModal(false); setEditingExpense(null);
+      setShowModal(false);
+      setEditingExpense(null);
     } catch (err) {
       toast.error(err?.message || T.createErr);
-    } finally { setSaving(false); }
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDeleteConfirm = async () => {
@@ -178,7 +440,9 @@ export default function ExpensesPage() {
       setDeleteTarget(null);
     } catch (err) {
       toast.error(err?.message || T.createErr);
-    } finally { setDeleting(false); }
+    } finally {
+      setDeleting(false);
+    }
   };
 
   return (
@@ -199,7 +463,7 @@ export default function ExpensesPage() {
         <StatCard label={T.total} value={stats.total} icon={Wallet} color="bg-blue-500" />
         <StatCard label={T.totalAmount} value={formatETB(stats.totalAmount)} icon={DollarSign} color="bg-red-500" />
         <StatCard label={T.cash} value={formatETB(stats.cashTotal)} icon={Banknote} color="bg-green-500" />
-        <StatCard label={T.nonCash} value={formatETB(stats.nonCashTotal)} icon={CreditCard} color="bg-purple-500" />
+        <StatCard label={T.nonCash} value={formatETB(stats.nonCashTotal)} icon={ArrowLeftRight} color="bg-purple-500" />
       </div>
 
       <Card padding="sm">
@@ -209,10 +473,10 @@ export default function ExpensesPage() {
             <input type="text" placeholder={T.search} value={search} onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-sm" />
           </div>
-          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}
+          <select value={reasonFilter} onChange={(e) => setReasonFilter(e.target.value)}
             className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
-            <option value="all">{T.allCategories}</option>
-            {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+            <option value="all">{T.allReasons}</option>
+            {uniqueReasons.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
           <select value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)}
             className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
@@ -241,9 +505,8 @@ export default function ExpensesPage() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="px-4 py-3 text-left font-semibold text-gray-700">{T.description}</th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-700">{T.paidTo}</th>
-                <th className="px-4 py-3 text-center font-semibold text-gray-700">{T.category}</th>
+                <th className="px-4 py-3 text-left font-semibold text-gray-700">{T.ownerName}</th>
+                <th className="px-4 py-3 text-left font-semibold text-gray-700">{T.reason}</th>
                 <th className="px-4 py-3 text-right font-semibold text-gray-700">{T.amount} (ETB)</th>
                 <th className="px-4 py-3 text-center font-semibold text-gray-700">{T.paymentMethod}</th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-700">{T.branch}</th>
@@ -253,18 +516,18 @@ export default function ExpensesPage() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={8} className="text-center py-12">
+                <tr><td colSpan={7} className="text-center py-12">
                   <Loader2 size={28} className="animate-spin text-gray-400 mx-auto mb-2" />
                   <p className="text-sm text-gray-500">{T.loading}</p>
                 </td></tr>
               ) : fetchError ? (
-                <tr><td colSpan={8} className="text-center py-12">
+                <tr><td colSpan={7} className="text-center py-12">
                   <p className="text-sm text-red-600 font-medium">{T.error}</p>
                   <p className="text-xs text-gray-500 mt-1">{fetchError}</p>
                   <button onClick={loadExpenses} className="mt-3 px-3 py-1.5 text-xs bg-brand text-white rounded-lg">{T.retry}</button>
                 </td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={8} className="text-center py-12">
+                <tr><td colSpan={7} className="text-center py-12">
                   <div className="flex flex-col items-center gap-2">
                     <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center">
                       <Wallet size={28} className="text-gray-400" />
@@ -275,18 +538,16 @@ export default function ExpensesPage() {
               ) : (
                 filtered.map((expense) => {
                   const payment = PAYMENT_METHODS[expense.paymentMethod] || { label: expense.paymentMethod, color: 'gray' };
+                  const ownerText = expense.paidTo || expense.ownerName || '-';
+                  const reasonText = expense.reason || expense.category || expense.description || '-';
                   return (
                     <tr key={expense._id} className="border-b border-gray-100 hover:bg-gray-50">
-                      <td className="px-4 py-3">
-                        <p className="font-medium text-gray-800">{expense.description || '-'}</p>
-                        {expense.reference && <p className="text-xs text-gray-400 mt-0.5">#{expense.reference}</p>}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-gray-700">{expense.paidTo || '-'}</td>
-                      <td className="px-4 py-3 text-center text-xs text-gray-600">{categoryLabel(expense.category)}</td>
+                      <td className="px-4 py-3 font-medium text-gray-800">{ownerText}</td>
+                      <td className="px-4 py-3 text-xs text-gray-700">{reasonText}</td>
                       <td className="px-4 py-3 text-right font-semibold text-red-600">{formatETB(expense.amount)}</td>
                       <td className="px-4 py-3 text-center"><Badge color={payment.color}>{payment.label}</Badge></td>
                       <td className="px-4 py-3 text-xs text-gray-600">{expense.branch?.name || '-'}</td>
-                      <td className="px-4 py-3 text-xs text-gray-500">{formatDate(expense.expenseDate)}</td>
+                      <td className="px-4 py-3 text-xs text-gray-500">{formatEthiopianDate(expense.expenseDate)}</td>
                       <td className="px-4 py-3">
                         <ActionButtons
                           onView={() => setViewExpense(expense)}
@@ -312,13 +573,13 @@ export default function ExpensesPage() {
           currentUser={user} branches={branches} saving={saving} />
       </Modal>
 
-      <Modal isOpen={!!viewExpense} onClose={() => setViewExpense(null)} title={T.expenses}>
+      <Modal isOpen={!!viewExpense} onClose={() => setViewExpense(null)} title={T.expenses} size="md">
         {viewExpense && <ExpenseView expense={viewExpense} />}
       </Modal>
 
       <ConfirmModal isOpen={!!deleteTarget} onClose={() => setDeleteTarget(null)}
         onConfirm={handleDeleteConfirm} title={T.deleteTitle} message={T.deleteMsg}
-        itemName={deleteTarget?.description}
+        itemName={deleteTarget?.paidTo || deleteTarget?.ownerName || deleteTarget?.reason}
         itemType={`${deleteTarget ? formatETB(deleteTarget.amount) : ''}`}
         confirmLabel={T.confirmDelete} cancelLabel={T.keep}
         loading={deleting} variant="danger" />
@@ -352,13 +613,11 @@ function ExpenseForm({ expense, onSave, onCancel, currentUser, branches, saving 
     || branches[0]?._id || '';
 
   const [form, setForm] = useState({
-    description: expense?.description || '',
-    paidTo: expense?.paidTo || '',
+    ownerName: expense?.paidTo || expense?.ownerName || '',
     amount: expense?.amount ?? '',
-    category: expense?.category || 'other',
-    paymentMethod: expense?.paymentMethod || 'cash',
+    reason: expense?.reason || expense?.category || expense?.description || '',
+    paymentMethod: expense?.paymentMethod === 'cash' ? 'cash' : 'transfer',
     expenseDate: expense?.expenseDate ? String(expense.expenseDate).slice(0, 10) : new Date().toISOString().split('T')[0],
-    reference: expense?.reference || '',
     branch: defaultBranch,
   });
 
@@ -368,81 +627,86 @@ function ExpenseForm({ expense, onSave, onCancel, currentUser, branches, saving 
     e.preventDefault();
     if (!form.branch) { toast.error(T.branchReq); return; }
     onSave({
-      description: form.description.trim(),
-      paidTo: form.paidTo.trim(),
+      paidTo: form.ownerName.trim(),
+      ownerName: form.ownerName.trim(),
       amount: Number(form.amount),
-      category: form.category,
+      reason: form.reason.trim(),
+      category: form.reason.trim(),
       paymentMethod: form.paymentMethod,
       expenseDate: form.expenseDate,
-      reference: form.reference || undefined,
       branch: form.branch,
     });
   };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <FormField label={T.description + ' *'}>
-        <input name="description" value={form.description} onChange={onChange} required placeholder={T.descPlaceholder}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+      <FormField label={T.ownerName + ' *'}>
+        <input name="ownerName" value={form.ownerName} onChange={onChange} required placeholder={T.ownerPlaceholder}
+          className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand" />
       </FormField>
-      <FormField label={T.paidTo + ' *'}>
-        <input name="paidTo" value={form.paidTo} onChange={onChange} required placeholder={T.paidPlaceholder}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-      </FormField>
+
       <FormField label={T.amount + ' (ETB) *'}>
         <div className="relative">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm font-medium">ETB</span>
           <input type="number" name="amount" value={form.amount} onChange={onChange}
             required min={0} step="0.01" placeholder="0.00"
-            className="w-full pl-14 pr-3 py-2 border border-gray-300 rounded-lg text-sm font-semibold" />
+            className="w-full pl-14 pr-3 py-2 border border-gray-300 rounded-xl text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand" />
         </div>
       </FormField>
-      <FormField label={T.category + ' *'}>
-        <select name="category" value={form.category} onChange={onChange} required
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
-          {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-        </select>
+
+      <FormField label={T.reason + ' *'}>
+        <input name="reason" value={form.reason} onChange={onChange} required placeholder={T.reasonPlaceholder}
+          className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand" />
       </FormField>
+
       <FormField label={T.paymentMethod + ' *'}>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-2.5">
           {Object.entries(PAYMENT_METHODS).map(([key, val]) => (
-            <button key={key} type="button" onClick={() => setForm((f) => ({ ...f, paymentMethod: key }))}
-              className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border-2 font-medium text-sm transition ${
-                form.paymentMethod === key ? 'border-brand bg-brand/10 text-brand' : 'border-gray-300 text-gray-700 hover:bg-gray-50'
-              }`}>
-              {key === 'cash' ? <Banknote size={16} /> : <CreditCard size={16} />}
+            <button
+              key={key}
+              type="button"
+              onClick={() => setForm((f) => ({ ...f, paymentMethod: key }))}
+              className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border-2 font-medium text-sm transition ${
+                form.paymentMethod === key
+                  ? 'border-sky-500 bg-sky-50/90 text-sky-700 shadow-sm'
+                  : 'border-gray-200 text-gray-700 hover:bg-sky-50 hover:border-sky-300 hover:text-sky-700'
+              }`}
+            >
+              {key === 'cash' ? <Banknote size={16} /> : <ArrowLeftRight size={16} />}
               {val.label}
             </button>
           ))}
         </div>
       </FormField>
+
       <FormField label={T.date + ' *'}>
-        <input type="date" name="expenseDate" value={form.expenseDate} onChange={onChange} required
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+        <EthiopianDateInput
+          value={form.expenseDate}
+          onChange={(val) => setForm((f) => ({ ...f, expenseDate: val }))}
+          required
+        />
       </FormField>
+
       <FormField label={T.branch + ' *'}>
         {isSeller ? (
-          <div className="w-full px-3 py-2 rounded-lg bg-blue-50 text-blue-700 text-sm font-medium">
+          <div className="w-full px-3 py-2 rounded-xl bg-blue-50 text-blue-700 text-sm font-medium">
             {typeof currentUser.branch === 'object' ? currentUser.branch?.name : T.branch}
           </div>
         ) : branches.length === 0 ? (
           <div className="text-xs text-red-600">{T.branchNotFound}</div>
         ) : (
           <select name="branch" value={form.branch} onChange={onChange} required
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-sm">
+            className="w-full px-3 py-2 border border-gray-300 rounded-xl bg-white text-sm focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand">
             {branches.map((b) => <option key={b._id} value={b._id}>{b.name}</option>)}
           </select>
         )}
       </FormField>
-      <FormField label={T.optional}>
-        <input name="reference" value={form.reference} onChange={onChange} placeholder={T.refPlaceholder}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-      </FormField>
-      <div className="flex gap-2 pt-2 border-t border-gray-200">
+
+      <div className="flex gap-2.5 pt-3 border-t border-gray-200">
         <button type="button" onClick={onCancel} disabled={saving}
-          className="flex-1 px-4 py-2.5 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-50">{T.cancel}</button>
+          className="flex-1 px-4 py-2.5 rounded-xl border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-50 transition">{T.cancel}</button>
         <button type="submit" disabled={saving}
-          className="flex-1 px-4 py-2.5 rounded-lg bg-brand text-white font-semibold hover:bg-brand-dark disabled:opacity-50 flex items-center justify-center gap-2">
+          className="flex-1 px-4 py-2.5 rounded-xl bg-brand text-white font-semibold hover:bg-brand-dark disabled:opacity-50 flex items-center justify-center gap-2 transition">
           {saving && <Loader2 size={16} className="animate-spin" />}
           {expense ? T.update : T.save}
         </button>
@@ -454,32 +718,46 @@ function ExpenseForm({ expense, onSave, onCancel, currentUser, branches, saving 
 function FormField({ label, children }) {
   return (
     <div>
-      <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+      <label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>
       {children}
     </div>
   );
 }
 
 function ExpenseView({ expense }) {
-  const payment = PAYMENT_METHODS[expense.paymentMethod] || { label: expense.paymentMethod };
+  const payment = PAYMENT_METHODS[expense.paymentMethod] || { label: expense.paymentMethod, color: 'gray' };
+  const ownerText = expense.paidTo || expense.ownerName || '-';
+  const reasonText = expense.reason || expense.category || expense.description || '-';
+
   return (
-    <div>
-      <div className="flex items-center gap-3 pb-4 border-b border-gray-100">
-        <div className="w-14 h-14 rounded-xl bg-red-50 flex items-center justify-center">
-          <Wallet size={28} className="text-red-600" />
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3 p-4 rounded-2xl bg-gradient-to-r from-red-50 to-orange-50/70 border border-red-100">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-12 h-12 rounded-xl bg-red-600 text-white flex items-center justify-center flex-shrink-0 shadow-sm">
+            <Wallet size={24} />
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-red-700 uppercase tracking-wide">{T.ownerName}</p>
+            <p className="font-bold text-gray-900 text-lg truncate">{ownerText}</p>
+          </div>
         </div>
-        <div>
-          <p className="font-bold text-gray-800 text-lg">{expense.description}</p>
-          <p className="text-sm text-red-600 font-semibold">{formatETB(expense.amount)}</p>
+        <div className="text-right flex-shrink-0">
+          <p className="text-xs text-gray-500">{T.amount}</p>
+          <p className="text-lg font-extrabold text-red-600">{formatETB(expense.amount)}</p>
         </div>
       </div>
-      <div className="space-y-3 pt-3 text-sm">
-        <Row label={T.paidTo} value={expense.paidTo || '-'} icon={User} />
-        <Row label={T.category} value={categoryLabel(expense.category)} />
-        <Row label={T.amount} value={formatETB(expense.amount)} icon={DollarSign} bold color="text-red-600" />
-        <Row label={T.date} value={formatDate(expense.expenseDate)} icon={Calendar} />
+
+      <div className="rounded-2xl border border-gray-100 bg-gray-50/60 p-4 space-y-3 text-sm">
+        <Row label={T.ownerName} value={ownerText} icon={User} bold />
+        <Row label={T.reason} value={reasonText} icon={Tag} />
+        <div className="flex items-center justify-between gap-3 pt-1 border-t border-gray-200/70">
+          <span className="text-gray-500 flex items-center gap-1.5 text-xs font-medium">
+            <CreditCard size={13} /> {T.paymentMethod}:
+          </span>
+          <Badge color={payment.color}>{payment.label}</Badge>
+        </div>
         <Row label={T.branch} value={expense.branch?.name || '-'} icon={Building2} />
-        {expense.reference && <Row label={T.optional} value={expense.reference} />}
+        <Row label={T.date} value={formatEthiopianDate(expense.expenseDate)} icon={Calendar} />
       </div>
     </div>
   );
@@ -487,11 +765,11 @@ function ExpenseView({ expense }) {
 
 function Row({ label, value, icon: Icon, bold, color }) {
   return (
-    <div className="flex justify-between gap-3">
-      <span className="text-gray-500 flex-shrink-0 flex items-center gap-1">
-        {Icon && <Icon size={12} />} {label}:
+    <div className="flex justify-between items-center gap-3">
+      <span className="text-gray-500 flex-shrink-0 flex items-center gap-1.5 text-xs font-medium">
+        {Icon && <Icon size={13} />} {label}:
       </span>
-      <span className={`text-right ${bold ? 'font-semibold' : ''} ${color || 'text-gray-800'}`}>{value}</span>
+      <span className={`text-right ${bold ? 'font-semibold' : 'font-medium'} ${color || 'text-gray-800'}`}>{value}</span>
     </div>
   );
 }

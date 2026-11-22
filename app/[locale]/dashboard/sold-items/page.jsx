@@ -6,10 +6,10 @@ import Link from 'next/link';
 import {
   ShoppingBag, Search, RefreshCw, AlertCircle, Building2, Package,
   Download, Plus, Receipt, Wallet, TrendingUp, Phone,
-  ClipboardList, Box, CheckCircle2, Eye,
+  ClipboardList, Box, CheckCircle2, Eye, Calendar,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
-import { formatETB, formatDate } from '@/lib/utils';
+import { formatETB } from '@/lib/utils';
 import Card from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
@@ -17,6 +17,261 @@ import Modal from '@/components/ui/Modal';
 import ConfirmModal from '@/components/ui/ConfirmModal';
 import ActionButtons from '@/components/ui/ActionButtons';
 import toast from 'react-hot-toast';
+
+// ---------- Ethiopian Calendar Helpers ----------
+const ETHIOPIAN_TIME_ZONE = 'Africa/Addis_Ababa';
+
+const ETHIOPIAN_MONTHS = [
+  { value: 1,  label: 'መስከረም' },
+  { value: 2,  label: 'ጥቅምት' },
+  { value: 3,  label: 'ኅዳር' },
+  { value: 4,  label: 'ታኅሣሥ' },
+  { value: 5,  label: 'ጥር' },
+  { value: 6,  label: 'የካቲት' },
+  { value: 7,  label: 'መጋቢት' },
+  { value: 8,  label: 'ሚያዝያ' },
+  { value: 9,  label: 'ግንቦት' },
+  { value: 10, label: 'ሰኔ' },
+  { value: 11, label: 'ሐምሌ' },
+  { value: 12, label: 'ነሐሴ' },
+  { value: 13, label: 'ጳጉሜን' },
+];
+
+const ETHIOPIAN_WEEKDAYS_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+const formatEthiopianDate = (date) => {
+  if (!date) return '—';
+  const d = date instanceof Date ? date : new Date(date);
+  if (isNaN(d.getTime())) return '—';
+  try {
+    return new Intl.DateTimeFormat('am-ET-u-ca-ethiopic', {
+      timeZone: ETHIOPIAN_TIME_ZONE,
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    }).format(d);
+  } catch (e) {
+    return d.toLocaleDateString('am-ET', { timeZone: ETHIOPIAN_TIME_ZONE });
+  }
+};
+
+function toUtcNoonDate(isoStr) {
+  if (!isoStr) return new Date(NaN);
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(isoStr).trim());
+  if (match) {
+    return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12, 0, 0));
+  }
+  const d = new Date(isoStr);
+  if (isNaN(d.getTime())) return new Date(NaN);
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 12, 0, 0));
+}
+
+function toIsoDateFromUtc(date) {
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(date.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function getEthDateParts(isoStr) {
+  const date = toUtcNoonDate(isoStr);
+  if (isNaN(date.getTime())) return null;
+
+  const weekdayStr = new Intl.DateTimeFormat('en-US', {
+    timeZone: ETHIOPIAN_TIME_ZONE,
+    weekday: 'short',
+  }).format(date);
+  const dow = ETHIOPIAN_WEEKDAYS_EN.indexOf(weekdayStr);
+
+  try {
+    const parts = new Intl.DateTimeFormat('en-u-ca-ethiopic', {
+      timeZone: ETHIOPIAN_TIME_ZONE,
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+    }).formatToParts(date);
+
+    const year = Number(parts.find((p) => p.type === 'year')?.value);
+    const month = Number(parts.find((p) => p.type === 'month')?.value);
+    const day = Number(parts.find((p) => p.type === 'day')?.value);
+    if (year && month && day) {
+      return { year, month, day, dow: dow >= 0 ? dow : 0 };
+    }
+  } catch (e) {
+    // Fallback handled below
+  }
+  return null;
+}
+
+function ethToGregorianIso(ethYear, ethMonth, ethDay) {
+  const isLeap = (ethYear + 1) % 4 === 0;
+  const maxDay = ethMonth === 13 ? (isLeap ? 6 : 5) : 30;
+  const clampedDay = Math.min(Math.max(1, ethDay), maxDay);
+
+  let gYear = ethYear + 7;
+  let gMonth = ethMonth + 8;
+  if (gMonth > 12) {
+    gMonth -= 12;
+    gYear += 1;
+  }
+
+  const candidate = new Date(Date.UTC(gYear, gMonth - 1, Math.min(clampedDay + 10, 28), 12, 0, 0));
+  for (let i = -15; i <= 15; i++) {
+    const test = new Date(candidate.getTime() + i * 86400000);
+    const p = getEthDateParts(toIsoDateFromUtc(test));
+    if (p && p.year === ethYear && p.month === ethMonth && p.day === clampedDay) {
+      return toIsoDateFromUtc(test);
+    }
+  }
+  return toIsoDateFromUtc(candidate);
+}
+
+function getEthMonthDays(ethYear, ethMonth) {
+  const isLeap = (ethYear + 1) % 4 === 0;
+  const totalDays = ethMonth === 13 ? (isLeap ? 6 : 5) : 30;
+  const days = [];
+  for (let d = 1; d <= totalDays; d++) {
+    const iso = ethToGregorianIso(ethYear, ethMonth, d);
+    const parts = getEthDateParts(iso);
+    days.push({ day: d, iso, dow: parts ? parts.dow : 0 });
+  }
+  return days;
+}
+
+function EthiopianDateInput({ value, onChange, required = false, placeholder = 'የኢትዮጵያ ቀን ይምረጡ' }) {
+  const initialParts = useMemo(() => {
+    const p = getEthDateParts(value);
+    return p || { year: 2019, month: 3, day: 13, dow: 0 };
+  }, [value]);
+
+  const [open, setOpen] = useState(false);
+  const [viewYear, setViewYear] = useState(initialParts.year);
+  const [viewMonth, setViewMonth] = useState(initialParts.month);
+
+  useEffect(() => {
+    const p = getEthDateParts(value);
+    if (p) {
+      setViewYear(p.year);
+      setViewMonth(p.month);
+    }
+  }, [value]);
+
+  const monthDays = useMemo(() => getEthMonthDays(viewYear, viewMonth), [viewYear, viewMonth]);
+  const leadingBlanks = monthDays.length > 0 ? monthDays[0].dow : 0;
+
+  const selectDate = (iso) => {
+    onChange(iso);
+    setOpen(false);
+  };
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-white hover:border-sky-300 hover:bg-sky-50/50 focus:border-brand focus:outline-none text-xs text-gray-800 flex items-center justify-between gap-2 text-left transition"
+      >
+        <span className={value ? 'text-gray-800 font-medium truncate' : 'text-gray-400 truncate'}>
+          {value ? formatEthiopianDate(`${value}T12:00:00`) : placeholder}
+        </span>
+        <Calendar size={14} className="text-gray-400 flex-shrink-0" />
+      </button>
+      {required && (
+        <input
+          type="text"
+          tabIndex={-1}
+          aria-hidden="true"
+          value={value || ''}
+          onChange={() => {}}
+          required
+          className="sr-only"
+        />
+      )}
+
+      {open && (
+        <div className="absolute z-30 mt-1.5 w-72 bg-white border border-gray-200 rounded-2xl shadow-xl p-3">
+          <div className="flex items-center justify-between gap-2 mb-2.5">
+            <select
+              value={viewMonth}
+              onChange={(e) => setViewMonth(Number(e.target.value))}
+              className="px-2.5 py-1 border border-gray-200 rounded-lg text-xs font-semibold text-gray-800 bg-gray-50 focus:outline-none focus:ring-1 focus:ring-brand"
+            >
+              {ETHIOPIAN_MONTHS.map((m) => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
+            <input
+              type="number"
+              value={viewYear}
+              onChange={(e) => setViewYear(Number(e.target.value) || 2019)}
+              className="w-20 px-2 py-1 border border-gray-200 rounded-lg text-xs font-semibold text-gray-800 bg-gray-50 focus:outline-none focus:ring-1 focus:ring-brand"
+            />
+          </div>
+
+          <div className="grid grid-cols-7 text-center text-[10px] font-semibold text-gray-400 mb-1">
+            <span>እሑድ</span>
+            <span>ሰኞ</span>
+            <span>ማክሰ</span>
+            <span>ረቡዕ</span>
+            <span>ሐሙስ</span>
+            <span>ዓርብ</span>
+            <span>ቅዳሜ</span>
+          </div>
+
+          <div className="grid grid-cols-7 gap-1 text-center text-xs">
+            {Array.from({ length: leadingBlanks }).map((_, idx) => (
+              <span key={`b-${idx}`} />
+            ))}
+            {monthDays.map((d) => {
+              const isSelected = value === d.iso;
+              return (
+                <button
+                  key={d.day}
+                  type="button"
+                  onClick={() => selectDate(d.iso)}
+                  className={`h-7 w-full rounded-lg text-xs font-medium transition ${
+                    isSelected
+                      ? 'bg-brand text-white font-bold shadow-sm'
+                      : 'text-gray-700 hover:bg-sky-50 hover:text-sky-700'
+                  }`}
+                >
+                  {d.day}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-gray-100 text-xs">
+            <button
+              type="button"
+              onClick={() => selectDate(toIsoDateFromUtc(new Date()))}
+              className="text-brand font-semibold hover:underline"
+            >
+              ዛሬ
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onChange('');
+                setOpen(false);
+              }}
+              className="text-gray-400 hover:text-gray-600 font-medium"
+            >
+              አጽዳ
+            </button>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="text-gray-500 hover:text-gray-700 font-medium"
+            >
+              ዝጋ
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ---------- Helpers ----------
 const getBuyPrice = (p) => Number(
@@ -44,7 +299,6 @@ const isSoldOrder = (o) => {
 };
 
 // ---------- Origin detection ----------
-// An order originated from a product if `product` is set.
 const isFromProduct = (row) =>
   Boolean(row?._productId || row?.product?._id || row?.product);
 
@@ -74,10 +328,9 @@ export default function SoldItemsPage() {
   const [dateFrom, setDateFrom]         = useState('');
   const [dateTo, setDateTo]             = useState('');
 
-  // ---- Modal states: separate for ADD, EDIT (product), EDIT (order), VIEW ----
   const [showAdd, setShowAdd]         = useState(false);
-  const [editProduct, setEditProduct] = useState(null);   // row with product origin
-  const [editOrder, setEditOrder]     = useState(null);   // row with order origin
+  const [editProduct, setEditProduct] = useState(null);
+  const [editOrder, setEditOrder]     = useState(null);
   const [viewRow, setViewRow]         = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting]       = useState(false);
@@ -163,7 +416,7 @@ export default function SoldItemsPage() {
         _productId:   product?._id || '',
         _product:     product,
         _productName: product?.name || o.itemType || 'Unknown',
-        _category:    product?.category || o.category || '—',
+        _itemType:    o.itemType || product?.category || o.category || '—',
         _costPrice:   costPrice,
         _costTotal:   cost,
         _profit:      profit,
@@ -176,15 +429,14 @@ export default function SoldItemsPage() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const from = dateFrom ? new Date(dateFrom) : null;
-    const to   = dateTo   ? new Date(dateTo)   : null;
-    if (to) to.setHours(23, 59, 59, 999);
+    const from = dateFrom ? new Date(`${dateFrom}T00:00:00`) : null;
+    const to   = dateTo   ? new Date(`${dateTo}T23:59:59.999`) : null;
 
     return enriched.filter((o) => {
       if (q) {
         const hay = [
           o._code, o.customerName, o.customerPhone,
-          o._productName, o._category, o.address,
+          o._productName, o._itemType, o.address,
         ].map((v) => String(v || '').toLowerCase()).join(' ');
         if (!hay.includes(q)) return false;
       }
@@ -210,16 +462,16 @@ export default function SoldItemsPage() {
 
   function exportCsv() {
     const headers = [
-      'ኮድ', 'ቀን', 'ስም', 'ስልክ', 'ምድብ',
+      'ኮድ', 'ቀን', 'ስም', 'ስልክ', 'የዕቃ አይነት',
       'ብዛት', 'የመግዣ', 'የመሸጫ', 'ጠቅላላ', 'ትርፍ',
       'ቅርንጫፍ', 'አድራሻ', 'ማስታወሻ',
     ];
     const lines = [headers.join(',')];
     filtered.forEach((o) => {
       const d0 = o.orderDate || o.createdAt;
-      const d  = d0 ? new Date(d0).toISOString().slice(0, 10) : '';
+      const d  = d0 ? formatEthiopianDate(d0) : '';
       const row = [
-        o._code, d, o.customerName, o.customerPhone, o._category,
+        o._code, d, o.customerName, o.customerPhone, o._itemType,
         o.quantity, o._costPrice, o.unitPrice, o.totalPrice, o._profit,
         o.branch?.name, o.address, o.note,
       ].map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',');
@@ -235,7 +487,6 @@ export default function SoldItemsPage() {
     toast.success('CSV ተወርዷል');
   }
 
-  // ---- Save: create / edit product / edit order ----
   async function handleCreate(payload) {
     try {
       const created = await apiFetch('/orders', {
@@ -324,12 +575,12 @@ export default function SoldItemsPage() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <button onClick={() => setReloadKey((k) => k + 1)} disabled={loading}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition disabled:opacity-50">
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 text-gray-700 hover:bg-sky-50 hover:text-sky-700 transition disabled:opacity-50">
             <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
             {loading ? 'በመጫን ላይ…' : 'አድስ'}
           </button>
           <button onClick={exportCsv} disabled={filtered.length === 0}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition disabled:opacity-40">
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 text-gray-700 hover:bg-sky-50 hover:text-sky-700 transition disabled:opacity-40">
             <Download size={13} /> CSV
           </button>
           {canManage && (
@@ -353,7 +604,7 @@ export default function SoldItemsPage() {
             <div className="relative">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
-                placeholder="ኮድ፣ ስም፣ ስልክ፣ ምድብ…"
+                placeholder="ኮድ፣ ስም፣ ስልክ፣ የዕቃ አይነት…"
                 className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand focus:outline-none" />
             </div>
           </div>
@@ -370,13 +621,11 @@ export default function SoldItemsPage() {
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="text-xs text-gray-500 mb-1 block">ከ</label>
-              <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
-                className="w-full px-2 py-2 rounded-lg border border-gray-200 text-xs focus:border-brand focus:outline-none" />
+              <EthiopianDateInput value={dateFrom} onChange={setDateFrom} placeholder="ከቀን" />
             </div>
             <div>
               <label className="text-xs text-gray-500 mb-1 block">እስከ</label>
-              <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
-                className="w-full px-2 py-2 rounded-lg border border-gray-200 text-xs focus:border-brand focus:outline-none" />
+              <EthiopianDateInput value={dateTo} onChange={setDateTo} placeholder="እስከ ቀን" />
             </div>
           </div>
         </div>
@@ -419,7 +668,7 @@ export default function SoldItemsPage() {
                 <tr className="text-left text-xs text-gray-500">
                   <th className="px-4 py-3 font-medium">ኮድ</th>
                   <th className="px-4 py-3 font-medium">ስም</th>
-                  <th className="px-4 py-3 font-medium">ምድብ</th>
+                  <th className="px-4 py-3 font-medium">የዕቃ አይነት</th>
                   <th className="px-4 py-3 font-medium text-right">ብዛት</th>
                   <th className="px-4 py-3 font-medium text-right">የመግዣ</th>
                   <th className="px-4 py-3 font-medium text-right">የመሸጫ</th>
@@ -436,7 +685,7 @@ export default function SoldItemsPage() {
                       <p className="font-medium text-gray-800">{o._productName}</p>
                       <p className="text-xs text-gray-500">{o.customerName} · {o.customerPhone}</p>
                     </td>
-                    <td className="px-4 py-3 text-gray-600 text-xs">{o._category}</td>
+                    <td className="px-4 py-3 text-gray-600 text-xs">{o._itemType}</td>
                     <td className="px-4 py-3 text-right text-gray-800">{o.quantity}</td>
                     <td className="px-4 py-3 text-right text-gray-600">{formatETB(o._costPrice || 0)}</td>
                     <td className="px-4 py-3 text-right font-semibold text-brand">{formatETB(o.unitPrice || 0)}</td>
@@ -574,6 +823,7 @@ function AddSaleForm({ orders, products, branches, userBranchId, isSeller, onCre
 
   const [form, setForm] = useState({
     productId:     '',
+    itemType:      '',
     customerName:  '',
     customerPhone: '',
     address:       '',
@@ -591,6 +841,13 @@ function AddSaleForm({ orders, products, branches, userBranchId, isSeller, onCre
     const { name, value } = e.target;
     if (name === 'quantity') {
       setForm((f) => ({ ...f, quantity: value === '' ? '' : Number(value) }));
+    } else if (name === 'productId') {
+      const prod = products.find((p) => String(p._id) === String(value));
+      setForm((f) => ({
+        ...f,
+        productId: value,
+        itemType: prod?.category || prod?.name || f.itemType,
+      }));
     } else {
       setForm((f) => ({ ...f, [name]: value }));
     }
@@ -605,24 +862,25 @@ function AddSaleForm({ orders, products, branches, userBranchId, isSeller, onCre
 
     const qty = Number(form.quantity) || 1;
     const totalPrice = qty * unitPrice;
+    const itemTypeVal = form.itemType.trim() || selectedProduct?.category || selectedProduct?.name || form.productId;
 
     onCreate({
-      product:       form.productId,
-      itemType:      selectedProduct?.name || form.productId,
-      category:      selectedProduct?.category || '',
-      customerName:  form.customerName.trim(),
-      customerPhone: form.customerPhone.trim(),
-      address:       form.address.trim(),
-      quantity:      qty,
-      unitPrice:     unitPrice,
-      totalPrice:    totalPrice,
-      prepayment:    0,
+      product:         form.productId,
+      itemType:        itemTypeVal,
+      category:        itemTypeVal,
+      customerName:    form.customerName.trim(),
+      customerPhone:   form.customerPhone.trim(),
+      address:         form.address.trim(),
+      quantity:        qty,
+      unitPrice:       unitPrice,
+      totalPrice:      totalPrice,
+      prepayment:      0,
       remainingPayment: totalPrice,
-      status:        'completed',
-      orderDate:     form.orderDate,
+      status:          'completed',
+      orderDate:       form.orderDate,
       appointmentDate: form.orderDate,
-      branch:        form.branch,
-      note:          form.note.trim(),
+      branch:          form.branch,
+      note:            form.note.trim(),
     });
   };
 
@@ -653,13 +911,17 @@ function AddSaleForm({ orders, products, branches, userBranchId, isSeller, onCre
       <div className="flex gap-2 p-1 rounded-lg bg-gray-100">
         <button type="button" onClick={() => setMode('product')}
           className={`flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium transition ${
-            mode === 'product' ? 'bg-white text-brand shadow-sm' : 'text-gray-600 hover:text-gray-800'
+            mode === 'product'
+              ? 'bg-sky-50 text-sky-700 border border-sky-200 shadow-sm'
+              : 'text-gray-600 hover:bg-sky-50/70 hover:text-sky-700'
           }`}>
           <Box size={14} /> ከሱቅ እቃዎች
         </button>
         <button type="button" onClick={() => setMode('order')}
           className={`flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium transition ${
-            mode === 'order' ? 'bg-white text-brand shadow-sm' : 'text-gray-600 hover:text-gray-800'
+            mode === 'order'
+              ? 'bg-sky-50 text-sky-700 border border-sky-200 shadow-sm'
+              : 'text-gray-600 hover:bg-sky-50/70 hover:text-sky-700'
           }`}>
           <ClipboardList size={14} /> ከትዕዛዝ
           {openOrders.length > 0 && (
@@ -670,7 +932,6 @@ function AddSaleForm({ orders, products, branches, userBranchId, isSeller, onCre
         </button>
       </div>
 
-      {/* From product */}
       {mode === 'product' && (
         <form onSubmit={handleSubmit} className="space-y-4">
           <FormField label="ምርት ይምረጡ *" full>
@@ -684,8 +945,8 @@ function AddSaleForm({ orders, products, branches, userBranchId, isSeller, onCre
           {selectedProduct && (
             <div className="grid grid-cols-3 gap-3 p-3 rounded-lg bg-gray-50 border border-gray-200 text-center">
               <div>
-                <p className="text-[10px] text-gray-400 uppercase">ምድብ</p>
-                <p className="text-sm font-semibold text-gray-800">{selectedProduct.category || '—'}</p>
+                <p className="text-[10px] text-gray-400 uppercase">የዕቃ አይነት</p>
+                <p className="text-sm font-semibold text-gray-800">{form.itemType || selectedProduct.category || '—'}</p>
               </div>
               <div>
                 <p className="text-[10px] text-gray-400 uppercase">የመግዣ</p>
@@ -698,10 +959,16 @@ function AddSaleForm({ orders, products, branches, userBranchId, isSeller, onCre
             </div>
           )}
 
-          <FormField label="ብዛት *">
-            <input type="number" name="quantity" value={form.quantity} onChange={onChange} required min={1}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-800 bg-white" />
-          </FormField>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <FormField label="የዕቃ አይነት">
+              <input name="itemType" value={form.itemType} onChange={onChange} placeholder="ለምሳሌ: ምጣድ"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-800 bg-white" />
+            </FormField>
+            <FormField label="ብዛት *">
+              <input type="number" name="quantity" value={form.quantity} onChange={onChange} required min={1}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-800 bg-white" />
+            </FormField>
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <FormField label="የደንበኛ ስም *">
@@ -720,8 +987,11 @@ function AddSaleForm({ orders, products, branches, userBranchId, isSeller, onCre
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <FormField label="ቀን *">
-              <input type="date" name="orderDate" value={form.orderDate} onChange={onChange} required
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-800 bg-white" />
+              <EthiopianDateInput
+                value={form.orderDate}
+                onChange={(val) => setForm((f) => ({ ...f, orderDate: val }))}
+                required
+              />
             </FormField>
             <FormField label="ቅርንጫፍ *">
               <select name="branch" value={form.branch} onChange={onChange} required
@@ -740,7 +1010,7 @@ function AddSaleForm({ orders, products, branches, userBranchId, isSeller, onCre
 
           <div className="flex gap-2 pt-2 border-t border-gray-200">
             <button type="button" onClick={onCancel}
-              className="flex-1 px-4 py-2.5 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 transition">
+              className="flex-1 px-4 py-2.5 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-sky-50 hover:text-sky-700 transition">
               ሰርዝ
             </button>
             <button type="submit"
@@ -751,7 +1021,6 @@ function AddSaleForm({ orders, products, branches, userBranchId, isSeller, onCre
         </form>
       )}
 
-      {/* From order */}
       {mode === 'order' && (
         <div className="space-y-3">
           {openOrders.length === 0 ? (
@@ -769,7 +1038,7 @@ function AddSaleForm({ orders, products, branches, userBranchId, isSeller, onCre
                   <tr className="text-left text-xs text-gray-500">
                     <th className="px-3 py-2 font-medium">ኮድ</th>
                     <th className="px-3 py-2 font-medium">ስም</th>
-                    <th className="px-3 py-2 font-medium">ምድብ</th>
+                    <th className="px-3 py-2 font-medium">የዕቃ አይነት</th>
                     <th className="px-3 py-2 font-medium text-right">ብዛት</th>
                     <th className="px-3 py-2 font-medium text-right">የመግዣ</th>
                     <th className="px-3 py-2 font-medium text-right">የመሸጫ</th>
@@ -783,31 +1052,36 @@ function AddSaleForm({ orders, products, branches, userBranchId, isSeller, onCre
                     const product = productByOrder.get(String(o?.product?._id ?? o?.product ?? ''));
                     const costPrice = getBuyPrice(product);
                     const qty = Number(o.quantity) || 1;
-                    const unit = Number(o.unitPrice) || getSellPrice(product) || 0;
-                    const revenue = Number(o.totalPrice) || unit * qty;
+                    const unitPrice = Number(o.unitPrice || o.price || getSellPrice(product) || (o.totalPrice ? o.totalPrice / qty : 0)) || 0;
+                    const revenue = Number(o.totalPrice) || unitPrice * qty;
                     const profit = revenue - costPrice * qty;
-                    const status = ORDER_STATUS[o.status] || { label: o.status || '—', color: 'gray' };
+                    const itemTypeText = o.itemType || product?.category || o.category || '—';
+
                     return (
                       <tr key={o._id} className="hover:bg-gray-50">
-                        <td className="px-3 py-2 font-mono text-xs text-brand">
-                          {o.orderNumber || `#${String(o._id).slice(-8)}`}
+                        <td className="px-3 py-2 font-mono text-xs text-brand font-medium">
+                          {o.orderNumber || `#${String(o._id).slice(-6)}`}
                         </td>
-                        <td className="px-3 py-2">
-                          <p className="font-medium text-gray-800 text-xs">{product?.name || o.itemType || '—'}</p>
-                          <p className="text-[10px] text-gray-500">{o.customerName}</p>
-                        </td>
-                        <td className="px-3 py-2 text-gray-600 text-xs">{product?.category || '—'}</td>
-                        <td className="px-3 py-2 text-right text-gray-800 text-xs">{qty}</td>
-                        <td className="px-3 py-2 text-right text-gray-600 text-xs">{formatETB(costPrice)}</td>
-                        <td className="px-3 py-2 text-right text-brand font-semibold text-xs">{formatETB(unit)}</td>
-                        <td className={`px-3 py-2 text-right font-semibold text-xs ${profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        <td className="px-3 py-2 text-xs text-gray-800">{product?.name || o.itemType || 'Unknown'}</td>
+                        <td className="px-3 py-2 text-xs text-gray-600">{itemTypeText}</td>
+                        <td className="px-3 py-2 text-right text-xs">{qty}</td>
+                        <td className="px-3 py-2 text-right text-xs">{formatETB(costPrice)}</td>
+                        <td className="px-3 py-2 text-right text-xs font-semibold text-brand">{formatETB(unitPrice)}</td>
+                        <td className={`px-3 py-2 text-right text-xs font-semibold ${profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                           {formatETB(profit)}
                         </td>
-                        <td className="px-3 py-2"><Badge color={status.color}>{status.label}</Badge></td>
-                        <td className="px-3 py-2">
-                          <button type="button" onClick={() => { onCompleteOrder(o._id); onCancel(); }}
-                            className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-brand text-white hover:bg-brand-dark">
-                            <CheckCircle2 size={11} /> ጨርስ
+                        <td className="px-3 py-2 text-xs">
+                          <Badge color={ORDER_STATUS[o.status]?.color || 'gray'}>
+                            {ORDER_STATUS[o.status]?.label || o.status}
+                          </Badge>
+                        </td>
+                        <td className="px-3 py-2 text-xs">
+                          <button
+                            type="button"
+                            onClick={() => onCompleteOrder(o._id)}
+                            className="px-2.5 py-1 rounded bg-brand text-white font-medium hover:bg-brand-dark transition"
+                          >
+                            አጠናቅቅ
                           </button>
                         </td>
                       </tr>
@@ -817,130 +1091,107 @@ function AddSaleForm({ orders, products, branches, userBranchId, isSeller, onCre
               </table>
             </div>
           )}
-          <div className="flex gap-2 pt-2 border-t border-gray-200">
-            <button type="button" onClick={onCancel}
-              className="flex-1 px-4 py-2.5 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 transition">
-              ዝጋ
-            </button>
-          </div>
         </div>
       )}
     </div>
   );
 }
 
-// ============================================================
-// EDIT FORM — FROM PRODUCT (shows product picker)
-// ============================================================
 function EditProductForm({ row, products, branches, userBranchId, isSeller, onSave, onCancel }) {
   const [form, setForm] = useState({
-    productId:     row?._productId || '',
-    customerName:  row?.customerName || '',
-    customerPhone: row?.customerPhone || '',
-    address:       row?.address || '',
-    quantity:      row?.quantity || 1,
-    orderDate:     row?.orderDate ? new Date(row.orderDate).toISOString().slice(0, 10) : '',
-    branch:        row?.branch?._id || row?.branch || userBranchId || '',
-    note:          row?.note || '',
+    productId:     row._productId || row.product?._id || row.product || '',
+    itemType:      row.itemType || row._itemType || '',
+    customerName:  row.customerName || '',
+    customerPhone: row.customerPhone || '',
+    address:       row.address || '',
+    quantity:      row.quantity || 1,
+    unitPrice:     row.unitPrice || 0,
+    orderDate:     row.orderDate ? String(row.orderDate).slice(0, 10) : (row.createdAt ? String(row.createdAt).slice(0, 10) : ''),
+    branch:        row.branch?._id || row.branch || userBranchId || '',
+    note:          row.note || '',
   });
-
-  const selectedProduct = products.find((p) => String(p._id) === String(form.productId));
-  const unitPrice = getSellPrice(selectedProduct) || Number(row?.unitPrice) || 0;
 
   const onChange = (e) => {
     const { name, value } = e.target;
-    if (name === 'quantity') {
-      setForm((f) => ({ ...f, quantity: value === '' ? '' : Number(value) }));
-    } else {
-      setForm((f) => ({ ...f, [name]: value }));
-    }
+    setForm((f) => ({
+      ...f,
+      [name]: ['quantity', 'unitPrice'].includes(name) ? Number(value) : value,
+    }));
   };
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!form.productId) { toast.error('ምርት ይምረጡ'); return; }
-    if (!form.customerName.trim()) { toast.error('የደንበኛ ስም ያስፈልጋል'); return; }
-    if (!form.customerPhone.trim()) { toast.error('የደንበኛ ስልክ ያስፈልጋል'); return; }
-
     const qty = Number(form.quantity) || 1;
-    const totalPrice = qty * unitPrice;
-
+    const unitPrice = Number(form.unitPrice) || 0;
     onSave({
-      product:       form.productId,
-      itemType:      selectedProduct?.name || form.productId,
-      category:      selectedProduct?.category || '',
+      product:       form.productId || undefined,
+      itemType:      form.itemType.trim() || undefined,
+      category:      form.itemType.trim() || undefined,
       customerName:  form.customerName.trim(),
       customerPhone: form.customerPhone.trim(),
       address:       form.address.trim(),
       quantity:      qty,
       unitPrice:     unitPrice,
-      totalPrice:    totalPrice,
-      prepayment:    0,
-      remainingPayment: totalPrice,
-      status:        'completed',
-      orderDate:     form.orderDate,
-      branch:        form.branch,
+      totalPrice:    qty * unitPrice,
+      orderDate:     form.orderDate || undefined,
+      branch:        form.branch || undefined,
       note:          form.note.trim(),
     });
   };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <FormField label="ምርት ይምረጡ *" full>
-        <select name="productId" value={form.productId} onChange={onChange} required
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-800">
-          <option value="">— ከተመዘገቡ ምርቶች ይምረጡ —</option>
-          {products.map((p) => <option key={p._id} value={p._id}>{p.name}</option>)}
-        </select>
-      </FormField>
-
-      <FormField label="ብዛት *">
-        <input type="number" name="quantity" value={form.quantity} onChange={onChange} required min={1}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-800 bg-white" />
-      </FormField>
-
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <FormField label="የደንበኛ ስም *">
-          <input name="customerName" value={form.customerName} onChange={onChange} required
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-800 bg-white" />
+        <FormField label="የዕቃ አይነት">
+          <input name="itemType" value={form.itemType} onChange={onChange}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
         </FormField>
-        <FormField label="ስልክ *">
-          <input name="customerPhone" value={form.customerPhone} onChange={onChange} required
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-800 bg-white" />
+        <FormField label="ብዛት *">
+          <input type="number" name="quantity" value={form.quantity} onChange={onChange} required min={1}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
         </FormField>
-        <FormField label="አድራሻ" full>
-          <input name="address" value={form.address} onChange={onChange}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-800 bg-white" />
+        <FormField label="የመሸጫ ዋጋ *">
+          <input type="number" name="unitPrice" value={form.unitPrice} onChange={onChange} required min={0}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
         </FormField>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <FormField label="ቀን *">
-          <input type="date" name="orderDate" value={form.orderDate} onChange={onChange} required
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-800 bg-white" />
+        <FormField label="ቀን">
+          <EthiopianDateInput
+            value={form.orderDate}
+            onChange={(val) => setForm((f) => ({ ...f, orderDate: val }))}
+          />
         </FormField>
-        <FormField label="ቅርንጫፍ *">
-          <select name="branch" value={form.branch} onChange={onChange} required
-            disabled={isSeller && !!userBranchId}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-800 disabled:opacity-60">
+        <FormField label="ቅርንጫፍ" full>
+          <select name="branch" value={form.branch} onChange={onChange} disabled={isSeller && !!userBranchId}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white disabled:opacity-60">
             <option value="">— ይምረጡ —</option>
             {branches.map((b) => <option key={b._id} value={b._id}>{b.name}</option>)}
           </select>
         </FormField>
+        <FormField label="የደንበኛ ስም *">
+          <input name="customerName" value={form.customerName} onChange={onChange} required
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+        </FormField>
+        <FormField label="ስልክ *">
+          <input name="customerPhone" value={form.customerPhone} onChange={onChange} required
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+        </FormField>
+        <FormField label="አድራሻ" full>
+          <input name="address" value={form.address} onChange={onChange}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+        </FormField>
+        <FormField label="ማስታወሻ" full>
+          <textarea name="note" value={form.note} onChange={onChange} rows={2}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm resize-none" />
+        </FormField>
       </div>
-
-      <FormField label="ማስታወሻ">
-        <textarea name="note" value={form.note} onChange={onChange} rows={2}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-800 bg-white resize-none" />
-      </FormField>
 
       <div className="flex gap-2 pt-2 border-t border-gray-200">
         <button type="button" onClick={onCancel}
-          className="flex-1 px-4 py-2.5 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 transition">
+          className="flex-1 px-4 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-sky-50 hover:text-sky-700 transition">
           ሰርዝ
         </button>
         <button type="submit"
-          className="flex-1 px-4 py-2.5 rounded-lg bg-brand text-white font-semibold hover:bg-brand-dark transition">
+          className="flex-1 px-4 py-2 rounded-lg bg-brand text-white font-semibold hover:bg-brand-dark transition">
           አስተካክል
         </button>
       </div>
@@ -948,57 +1199,91 @@ function EditProductForm({ row, products, branches, userBranchId, isSeller, onSa
   );
 }
 
-// ============================================================
-// EDIT FORM — FROM ORDER (read-only order details + status change)
-// ============================================================
 function EditOrderForm({ row, onSave, onCancel }) {
-  const [status, setStatus] = useState(row?.status || 'completed');
-  const [note, setNote] = useState(row?.note || '');
+  const [form, setForm] = useState({
+    itemType:      row.itemType || row._itemType || '',
+    customerName:  row.customerName || '',
+    customerPhone: row.customerPhone || '',
+    quantity:      row.quantity || 1,
+    totalPrice:    row.totalPrice || 0,
+    orderDate:     row.orderDate ? String(row.orderDate).slice(0, 10) : (row.createdAt ? String(row.createdAt).slice(0, 10) : ''),
+    status:        row.status || 'completed',
+    note:          row.note || '',
+  });
+
+  const onChange = (e) => {
+    const { name, value } = e.target;
+    setForm((f) => ({
+      ...f,
+      [name]: ['quantity', 'totalPrice'].includes(name) ? Number(value) : value,
+    }));
+  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    onSave({ status, note: note.trim() });
+    onSave({
+      itemType:      form.itemType.trim(),
+      customerName:  form.customerName.trim(),
+      customerPhone: form.customerPhone.trim(),
+      quantity:      Number(form.quantity) || 1,
+      totalPrice:    Number(form.totalPrice) || 0,
+      orderDate:     form.orderDate || undefined,
+      status:        form.status,
+      note:          form.note.trim(),
+    });
   };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="p-4 rounded-lg bg-gray-50 border border-gray-200 space-y-2 text-sm">
-        <p className="text-xs font-semibold text-gray-500 uppercase">የትዕዛዝ መረጃ (አንባቢ ብቻ)</p>
-        <Row label="ኮድ"      value={row._code} mono />
-        <Row label="ደንበኛ"   value={row.customerName} />
-        <Row label="ስልክ"      value={row.customerPhone} />
-        <Row label="ዕቃ"      value={`${row.itemType} × ${row.quantity}`} />
-        <Row label="ጠቅላላ"    value={formatETB(row.totalPrice || 0)} bold color="text-brand" />
-        <Row label="ቅድሚያ"   value={formatETB(row.prepayment || 0)} />
-        <Row label="ቀሪ"      value={formatETB(row.remainingPayment || 0)} color="text-orange-600" />
+      <FormField label="የዕቃ አይነት *">
+        <input name="itemType" value={form.itemType} onChange={onChange} required
+          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+      </FormField>
+      <div className="grid grid-cols-2 gap-3">
+        <FormField label="የደንበኛ ስም *">
+          <input name="customerName" value={form.customerName} onChange={onChange} required
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+        </FormField>
+        <FormField label="ስልክ *">
+          <input name="customerPhone" value={form.customerPhone} onChange={onChange} required
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+        </FormField>
+        <FormField label="ብዛት *">
+          <input type="number" name="quantity" value={form.quantity} onChange={onChange} required min={1}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+        </FormField>
+        <FormField label="ጠቅላላ ዋጋ *">
+          <input type="number" name="totalPrice" value={form.totalPrice} onChange={onChange} required min={0}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+        </FormField>
       </div>
-
-      <FormField label="ሁኔታ">
-        <select value={status} onChange={(e) => setStatus(e.target.value)}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-800">
-          <option value="pending">በመጠባበቅ</option>
-          <option value="in_production">በምርት ላይ</option>
-          <option value="ready">ዝግጁ</option>
-          <option value="picked_up">ተነስቷል</option>
-          <option value="delivered">ተላልፏል</option>
-          <option value="completed">ተጠናቅቋል</option>
-          <option value="paid">ተከፍሏል</option>
-          <option value="cancelled">ተሰርዟል</option>
-        </select>
-      </FormField>
-
+      <div className="grid grid-cols-2 gap-3">
+        <FormField label="ቀን">
+          <EthiopianDateInput
+            value={form.orderDate}
+            onChange={(val) => setForm((f) => ({ ...f, orderDate: val }))}
+          />
+        </FormField>
+        <FormField label="ሁኔታ">
+          <select name="status" value={form.status} onChange={onChange}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
+            {Object.entries(ORDER_STATUS).map(([k, v]) => (
+              <option key={k} value={k}>{v.label}</option>
+            ))}
+          </select>
+        </FormField>
+      </div>
       <FormField label="ማስታወሻ">
-        <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-800 bg-white resize-none" />
+        <textarea name="note" value={form.note} onChange={onChange} rows={2}
+          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm resize-none" />
       </FormField>
-
       <div className="flex gap-2 pt-2 border-t border-gray-200">
         <button type="button" onClick={onCancel}
-          className="flex-1 px-4 py-2.5 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 transition">
+          className="flex-1 px-4 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-sky-50 hover:text-sky-700 transition">
           ሰርዝ
         </button>
         <button type="submit"
-          className="flex-1 px-4 py-2.5 rounded-lg bg-brand text-white font-semibold hover:bg-brand-dark transition">
+          className="flex-1 px-4 py-2 rounded-lg bg-brand text-white font-semibold hover:bg-brand-dark transition">
           አስተካክል
         </button>
       </div>
@@ -1006,72 +1291,37 @@ function EditOrderForm({ row, onSave, onCancel }) {
   );
 }
 
-// ============================================================
-// VIEW — shows the details (includes origin note)
-// ============================================================
 function SoldItemView({ row }) {
-  const revenue = Number(row.totalPrice) || 0;
-  const cost    = Number(row._costTotal) || 0;
-  const profit  = revenue - cost;
-  const originLabel = row._origin === 'product' ? 'ከምርት' : 'ከትዕዛዝ';
-
   return (
-    <div>
-      <div className="flex items-center gap-3 pb-4 border-b border-gray-100">
-        <div className="w-14 h-14 rounded-lg bg-brand text-white flex items-center justify-center">
-          <Package size={26} />
-        </div>
+    <div className="space-y-4 text-sm">
+      <div className="flex items-center justify-between border-b border-gray-100 pb-3">
         <div>
-          <p className="font-bold text-gray-800 text-lg">{row._productName}</p>
-          <p className="text-sm text-gray-500 font-mono">{row._code}</p>
+          <p className="text-xs text-gray-500">ኮድ</p>
+          <p className="font-mono font-bold text-brand">{row._code}</p>
         </div>
-        <div className="ml-auto"><Badge color={row._statusColor}>{row._statusLabel}</Badge></div>
+        <Badge color={row._statusColor}>{row._statusLabel}</Badge>
       </div>
-      <div className="space-y-3 pt-4 text-sm">
-        <Section title="የሽያጭ ዝርዝር">
-          <Row label="ምንጭ"    value={originLabel} />
-          <Row label="ቀን"      value={formatDate(row.orderDate || row.createdAt)} />
-          <Row label="ምድብ"    value={row._category || '—'} />
-          <Row label="ብዛት"      value={row.quantity ?? 0} />
-          <Row label="የመሸጫ"   value={formatETB(row.unitPrice || 0)} />
-          <Row label="የመግዣ"   value={formatETB(row._costPrice || 0)} />
-          <Row label="ጠቅላላ ገቢ" value={formatETB(revenue)} bold color="text-brand" />
-          <Row label="ጠቅላላ ወጪ" value={formatETB(cost)} />
-          <Row label="ትርፍ"     value={formatETB(profit)} bold color={profit >= 0 ? 'text-green-600' : 'text-red-600'} />
-        </Section>
-        <Section title="ደንበኛ">
-          <Row label="ስም"       value={row.customerName || '—'} />
-          <Row label="ስልክ"       value={row.customerPhone || '—'} />
-          <Row label="አድራሻ"     value={row.address || '—'} />
-        </Section>
-        <Section title="ቦታ">
-          <Row label="ቅርንጫፍ"  value={row.branch?.name || '—'} />
-          <Row label="የፈጠረው" value={row.createdBy?.fullName || '—'} />
-        </Section>
-        {row.note && (
-          <Section title="ማስታወሻ">
-            <p className="text-sm text-gray-700 bg-gray-50 rounded-lg p-2">{row.note}</p>
-          </Section>
-        )}
+
+      <div className="space-y-2">
+        <div className="flex justify-between"><span className="text-gray-500">ምርት:</span><span className="font-medium text-gray-800">{row._productName}</span></div>
+        <div className="flex justify-between"><span className="text-gray-500">የዕቃ አይነት:</span><span className="font-medium text-gray-800">{row._itemType}</span></div>
+        <div className="flex justify-between"><span className="text-gray-500">ደንበኛ:</span><span className="font-medium text-gray-800">{row.customerName || '—'}</span></div>
+        <div className="flex justify-between"><span className="text-gray-500">ስልክ:</span><span className="font-medium text-gray-800">{row.customerPhone || '—'}</span></div>
+        <div className="flex justify-between"><span className="text-gray-500">ብዛት:</span><span className="font-medium text-gray-800">{row.quantity}</span></div>
+        <div className="flex justify-between"><span className="text-gray-500">የመግዣ:</span><span className="font-medium text-gray-800">{formatETB(row._costPrice || 0)}</span></div>
+        <div className="flex justify-between"><span className="text-gray-500">የመሸጫ:</span><span className="font-semibold text-brand">{formatETB(row.unitPrice || 0)}</span></div>
+        <div className="flex justify-between"><span className="text-gray-500">ጠቅላላ:</span><span className="font-semibold text-gray-800">{formatETB(row.totalPrice || 0)}</span></div>
+        <div className="flex justify-between"><span className="text-gray-500">ትርፍ:</span><span className={`font-semibold ${row._profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatETB(row._profit)}</span></div>
+        <div className="flex justify-between"><span className="text-gray-500">ቅርንጫፍ:</span><span className="font-medium text-gray-800">{row.branch?.name || '—'}</span></div>
+        <div className="flex justify-between"><span className="text-gray-500">ቀን:</span><span className="font-medium text-gray-800">{formatEthiopianDate(row.orderDate || row.createdAt)}</span></div>
       </div>
-    </div>
-  );
-}
 
-function Section({ title, children }) {
-  return (
-    <div>
-      <p className="text-xs font-semibold text-gray-500 uppercase mb-1.5">{title}</p>
-      <div className="space-y-1.5">{children}</div>
-    </div>
-  );
-}
-
-function Row({ label, value, bold, color, mono }) {
-  return (
-    <div className="flex justify-between gap-3">
-      <span className="text-gray-500 flex-shrink-0">{label}:</span>
-      <span className={`text-right ${bold ? 'font-semibold' : ''} ${mono ? 'font-mono text-xs' : ''} ${color || 'text-gray-800'}`}>{value}</span>
+      {row.note && (
+        <div className="p-3 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-700">
+          <p className="font-semibold text-gray-600 mb-1">ማስታወሻ:</p>
+          {row.note}
+        </div>
+      )}
     </div>
   );
 }

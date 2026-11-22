@@ -34,8 +34,8 @@ const MENU = [
     key: 'finance', fallback: 'ፋይናንስ', icon: Wallet, roles: ['admin', 'seller'],
     children: [
       { href: '/dashboard/expenses', key: 'expenses', fallback: 'ወጪዎች', icon: TrendingDown, roles: ['admin', 'seller'] },
-      { href: '/dashboard/analytics', key: 'analytics', fallback: 'ትንተና', icon: BarChart3, roles: ['admin', 'seller'] },
       { href: '/dashboard/sold-items', key: 'soldItems', fallback: 'የተሸጡ እቃዎች', icon: ShoppingBag, roles: ['admin', 'seller'] },
+      { href: '/dashboard/analytics', key: 'analytics', fallback: 'ትንተና', icon: BarChart3, roles: ['admin', 'seller'] },
     ],
   },
   {

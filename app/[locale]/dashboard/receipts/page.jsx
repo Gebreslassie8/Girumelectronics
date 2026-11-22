@@ -3,9 +3,9 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/components/providers/AuthProvider';
 import {
-  Plus, Search, FileText, CheckCircle2, Clock, AlertTriangle,
-  User, Phone, Calendar, Building2, DollarSign,
-  Printer, Download, MapPin, Hash, Package,
+  Plus, Search, FileText, CheckCircle2, Clock,
+  User, Calendar, Building2, DollarSign,
+  Printer, Download,
 } from 'lucide-react';
 import { formatETB } from '@/lib/utils';
 import { RECEIPT_STATUS, DEFAULT_RECEIPT_NOTE } from '@/lib/constants';
@@ -18,31 +18,247 @@ import ConfirmModal from '@/components/ui/ConfirmModal';
 import ActionButtons from '@/components/ui/ActionButtons';
 import toast from 'react-hot-toast';
 
-// ✅ Ethiopian calendar date formatter (replaces formatDate everywhere in this file)
+const ETHIOPIAN_TIME_ZONE = 'Africa/Addis_Ababa';
+
+const ETHIOPIAN_MONTHS = [
+  { value: 1,  label: 'መስከረም' },
+  { value: 2,  label: 'ጥቅምት' },
+  { value: 3,  label: 'ኅዳር' },
+  { value: 4,  label: 'ታኅሣሥ' },
+  { value: 5,  label: 'ጥር' },
+  { value: 6,  label: 'የካቲት' },
+  { value: 7,  label: 'መጋቢት' },
+  { value: 8,  label: 'ሚያዝያ' },
+  { value: 9,  label: 'ግንቦት' },
+  { value: 10, label: 'ሰኔ' },
+  { value: 11, label: 'ሐምሌ' },
+  { value: 12, label: 'ነሐሴ' },
+  { value: 13, label: 'ጳጉሜን' },
+];
+
+const ETHIOPIAN_WEEKDAYS_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
 const formatEthiopianDate = (date) => {
   if (!date) return '—';
-  const d = new Date(date);
+  const d = date instanceof Date ? date : new Date(date);
   if (isNaN(d.getTime())) return '—';
   try {
     return new Intl.DateTimeFormat('am-ET-u-ca-ethiopic', {
+      timeZone: ETHIOPIAN_TIME_ZONE,
       year: 'numeric',
       month: 'long',
       day: 'numeric',
     }).format(d);
   } catch (e) {
-    return d.toLocaleDateString('am-ET');
+    return d.toLocaleDateString('am-ET', { timeZone: ETHIOPIAN_TIME_ZONE });
   }
 };
 
-// Shows the Ethiopian date under a Gregorian <input type="date">
-function EthDatePreview({ value }) {
-  if (!value) return null;
-  // noon avoids timezone shifting the day
-  const eth = formatEthiopianDate(`${value}T12:00:00`);
+function toUtcNoonDate(isoStr) {
+  if (!isoStr) return new Date(NaN);
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(isoStr).trim());
+  if (match) {
+    return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12, 0, 0));
+  }
+  const d = new Date(isoStr);
+  if (isNaN(d.getTime())) return new Date(NaN);
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 12, 0, 0));
+}
+
+function toIsoDateFromUtc(date) {
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(date.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function getEthDateParts(isoStr) {
+  const date = toUtcNoonDate(isoStr);
+  if (isNaN(date.getTime())) return null;
+
+  const weekdayStr = new Intl.DateTimeFormat('en-US', {
+    timeZone: ETHIOPIAN_TIME_ZONE,
+    weekday: 'short',
+  }).format(date);
+  const dow = ETHIOPIAN_WEEKDAYS_EN.indexOf(weekdayStr);
+
+  try {
+    const parts = new Intl.DateTimeFormat('en-u-ca-ethiopic', {
+      timeZone: ETHIOPIAN_TIME_ZONE,
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+    }).formatToParts(date);
+
+    const year = Number(parts.find((p) => p.type === 'year')?.value);
+    const month = Number(parts.find((p) => p.type === 'month')?.value);
+    const day = Number(parts.find((p) => p.type === 'day')?.value);
+    if (year && month && day) {
+      return { year, month, day, dow: dow >= 0 ? dow : 0 };
+    }
+  } catch (e) {
+    // Fallback handled below
+  }
+  return null;
+}
+
+function ethToGregorianIso(ethYear, ethMonth, ethDay) {
+  const isLeap = (ethYear + 1) % 4 === 0;
+  const maxDay = ethMonth === 13 ? (isLeap ? 6 : 5) : 30;
+  const clampedDay = Math.min(Math.max(1, ethDay), maxDay);
+
+  let gYear = ethYear + 7;
+  let gMonth = ethMonth + 8;
+  if (gMonth > 12) {
+    gMonth -= 12;
+    gYear += 1;
+  }
+
+  const candidate = new Date(Date.UTC(gYear, gMonth - 1, Math.min(clampedDay + 10, 28), 12, 0, 0));
+  for (let i = -15; i <= 15; i++) {
+    const test = new Date(candidate.getTime() + i * 86400000);
+    const p = getEthDateParts(toIsoDateFromUtc(test));
+    if (p && p.year === ethYear && p.month === ethMonth && p.day === clampedDay) {
+      return toIsoDateFromUtc(test);
+    }
+  }
+  return toIsoDateFromUtc(candidate);
+}
+
+function getEthMonthDays(ethYear, ethMonth) {
+  const isLeap = (ethYear + 1) % 4 === 0;
+  const totalDays = ethMonth === 13 ? (isLeap ? 6 : 5) : 30;
+  const days = [];
+  for (let d = 1; d <= totalDays; d++) {
+    const iso = ethToGregorianIso(ethYear, ethMonth, d);
+    const parts = getEthDateParts(iso);
+    days.push({ day: d, iso, dow: parts ? parts.dow : 0 });
+  }
+  return days;
+}
+
+function EthiopianDateInput({ value, onChange, required = false }) {
+  const initialParts = useMemo(() => {
+    const p = getEthDateParts(value);
+    return p || { year: 2019, month: 3, day: 13, dow: 0 };
+  }, [value]);
+
+  const [open, setOpen] = useState(false);
+  const [viewYear, setViewYear] = useState(initialParts.year);
+  const [viewMonth, setViewMonth] = useState(initialParts.month);
+
+  useEffect(() => {
+    const p = getEthDateParts(value);
+    if (p) {
+      setViewYear(p.year);
+      setViewMonth(p.month);
+    }
+  }, [value]);
+
+  const monthDays = useMemo(() => getEthMonthDays(viewYear, viewMonth), [viewYear, viewMonth]);
+  const leadingBlanks = monthDays.length > 0 ? monthDays[0].dow : 0;
+
+  const selectDate = (iso) => {
+    onChange(iso);
+    setOpen(false);
+  };
+
   return (
-    <p className="text-[11px] text-brand font-medium mt-1 flex items-center gap-1">
-      <Calendar size={10} /> {eth}
-    </p>
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full px-3 py-2 border border-gray-200 rounded-xl bg-white hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand text-sm text-gray-800 flex items-center justify-between gap-2 text-left transition"
+      >
+        <span className={value ? 'text-gray-800 font-medium' : 'text-gray-400'}>
+          {value ? formatEthiopianDate(`${value}T12:00:00`) : 'የኢትዮጵያ ቀን ይምረጡ'}
+        </span>
+        <Calendar size={15} className="text-gray-400 flex-shrink-0" />
+      </button>
+      {required && (
+        <input
+          type="text"
+          tabIndex={-1}
+          aria-hidden="true"
+          value={value || ''}
+          onChange={() => {}}
+          required
+          className="sr-only"
+        />
+      )}
+
+      {open && (
+        <div className="absolute z-30 mt-1.5 w-72 bg-white border border-gray-200 rounded-2xl shadow-xl p-3">
+          <div className="flex items-center justify-between gap-2 mb-2.5">
+            <select
+              value={viewMonth}
+              onChange={(e) => setViewMonth(Number(e.target.value))}
+              className="px-2.5 py-1 border border-gray-200 rounded-lg text-xs font-semibold text-gray-800 bg-gray-50 focus:outline-none focus:ring-1 focus:ring-brand"
+            >
+              {ETHIOPIAN_MONTHS.map((m) => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
+            <input
+              type="number"
+              value={viewYear}
+              onChange={(e) => setViewYear(Number(e.target.value) || 2019)}
+              className="w-20 px-2 py-1 border border-gray-200 rounded-lg text-xs font-semibold text-gray-800 bg-gray-50 focus:outline-none focus:ring-1 focus:ring-brand"
+            />
+          </div>
+
+          <div className="grid grid-cols-7 text-center text-[10px] font-semibold text-gray-400 mb-1">
+            <span>እሑድ</span>
+            <span>ሰኞ</span>
+            <span>ማክሰ</span>
+            <span>ረቡዕ</span>
+            <span>ሐሙስ</span>
+            <span>ዓርብ</span>
+            <span>ቅዳሜ</span>
+          </div>
+
+          <div className="grid grid-cols-7 gap-1 text-center text-xs">
+            {Array.from({ length: leadingBlanks }).map((_, idx) => (
+              <span key={`b-${idx}`} />
+            ))}
+            {monthDays.map((d) => {
+              const isSelected = value === d.iso;
+              return (
+                <button
+                  key={d.day}
+                  type="button"
+                  onClick={() => selectDate(d.iso)}
+                  className={`h-7 w-full rounded-lg text-xs font-medium transition ${
+                    isSelected
+                      ? 'bg-brand text-white font-bold shadow-sm'
+                      : 'text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  {d.day}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-gray-100 text-xs">
+            <button
+              type="button"
+              onClick={() => selectDate(toIsoDateFromUtc(new Date()))}
+              className="text-brand font-semibold hover:underline"
+            >
+              ዛሬ
+            </button>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="text-gray-500 hover:text-gray-700 font-medium"
+            >
+              ዝጋ
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -166,7 +382,6 @@ export default function ReceiptsPage() {
   const printOrDownloadPDF = (receipt) => {
     const html = buildReceiptHTML(receipt, true);
 
-    // Create a hidden iframe with the receipt
     const iframe = document.createElement('iframe');
     iframe.style.position = 'fixed';
     iframe.style.right = '0';
@@ -181,7 +396,6 @@ export default function ReceiptsPage() {
         const iframeWindow = iframe.contentWindow;
         const iframeDoc = iframe.contentDocument || iframeWindow.document;
 
-        // Copy fonts from parent for Amharic
         const fontLinks = document.querySelectorAll('link[rel="stylesheet"], style');
         fontLinks.forEach((node) => {
           if (node.tagName === 'LINK') {
@@ -193,11 +407,9 @@ export default function ReceiptsPage() {
           }
         });
 
-        // Trigger native print dialog (browser renders to PDF perfectly)
         iframeWindow.focus();
         iframeWindow.print();
 
-        // Cleanup after a delay
         setTimeout(() => {
           if (iframe.parentNode) document.body.removeChild(iframe);
         }, 60000);
@@ -216,17 +428,17 @@ export default function ReceiptsPage() {
 
   if (loading) {
     return (
-      <div className="p-8 text-center text-gray-500">
-        <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-        <p className="text-sm">በመጫን ላይ...</p>
+      <div className="p-10 text-center text-gray-500">
+        <div className="w-10 h-10 border-4 border-brand border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+        <p className="text-sm font-medium">በመጫን ላይ...</p>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="p-8 text-center">
-        <p className="text-red-600 font-medium">ስህተት ተፈጥሯል</p>
+      <div className="p-10 text-center rounded-2xl bg-red-50/60 border border-red-100">
+        <p className="text-red-600 font-semibold">ስህተት ተፈጥሯል</p>
         <p className="text-sm text-gray-500 mt-1">{error}</p>
       </div>
     );
@@ -234,24 +446,32 @@ export default function ReceiptsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">ደረሰኞች</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            {filtered.length} ደረሰኞች · {formatETB(stats.totalPrepaid)} የተከፈለ
-          </p>
-          {user?.role === 'seller' && userBranchId && (
-            <p className="text-xs text-brand font-medium mt-1 flex items-center gap-1">
-              <Building2 size={12} />
-              {typeof user.branch === 'object' ? user.branch.name : 'ቅርንጫፍ'}
-            </p>
-          )}
-          {user?.role === 'customer' && (
-            <p className="text-xs text-brand font-medium mt-1 flex items-center gap-1">
-              <User size={12} />
-              የእኔ ደረሰኞች
-            </p>
-          )}
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900">ደረሰኞች</h1>
+          <div className="flex flex-wrap items-center gap-2 text-sm text-gray-500 mt-1">
+            <span>{filtered.length} ደረሰኞች</span>
+            <span>·</span>
+            <span className="font-semibold text-emerald-700">{formatETB(stats.totalPrepaid)} የተከፈለ</span>
+            {user?.role === 'seller' && userBranchId && (
+              <>
+                <span>·</span>
+                <span className="inline-flex items-center gap-1 text-xs font-medium text-brand bg-brand/5 px-2 py-0.5 rounded-full">
+                  <Building2 size={12} />
+                  {typeof user.branch === 'object' ? user.branch.name : 'ቅርንጫፍ'}
+                </span>
+              </>
+            )}
+            {user?.role === 'customer' && (
+              <>
+                <span>·</span>
+                <span className="inline-flex items-center gap-1 text-xs font-medium text-brand bg-brand/5 px-2 py-0.5 rounded-full">
+                  <User size={12} />
+                  የእኔ ደረሰኞች
+                </span>
+              </>
+            )}
+          </div>
         </div>
         {canManage && (
           <Button onClick={() => { setEditingReceipt(null); setShowModal(true); }}>
@@ -260,29 +480,29 @@ export default function ReceiptsPage() {
         )}
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard label="ጠቅላላ ደረሰኞች" value={stats.total} icon={FileText} color="bg-blue-500" />
-        <StatCard label="ንቁ" value={stats.active} icon={Clock} color="bg-green-500" />
-        <StatCard label="ተጠናቋል" value={stats.completed} icon={CheckCircle2} color="bg-purple-500" />
-        <StatCard label="የተከፈለ" value={formatETB(stats.totalPrepaid)} icon={DollarSign} color="bg-orange-500" />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard label="ጠቅላላ ደረሰኞች" value={stats.total} icon={FileText} color="bg-blue-600" />
+        <StatCard label="ንቁ" value={stats.active} icon={Clock} color="bg-emerald-600" />
+        <StatCard label="ተጠናቋል" value={stats.completed} icon={CheckCircle2} color="bg-indigo-600" />
+        <StatCard label="የተከፈለ" value={formatETB(stats.totalPrepaid)} icon={DollarSign} color="bg-amber-600" />
       </div>
 
-      <Card padding="sm">
+      <Card padding="sm" className="rounded-2xl border-gray-100 shadow-sm">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div className="relative">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               type="text"
               placeholder="ፈልግ (ደረሰኝ፣ ደንበኛ፣ ስልክ፣ ትዕዛዝ)..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800"
+              className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand text-sm text-gray-800 transition"
             />
           </div>
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm bg-white text-gray-800"
+            className="px-3 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand text-sm bg-white text-gray-800 transition"
           >
             <option value="all">ሁሉም ሁኔታዎች</option>
             {Object.entries(RECEIPT_STATUS).map(([k, v]) => (
@@ -294,13 +514,13 @@ export default function ReceiptsPage() {
             <select
               value={branchFilter}
               onChange={(e) => setBranchFilter(e.target.value)}
-              className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm bg-white text-gray-800"
+              className="px-3 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand text-sm bg-white text-gray-800 transition"
             >
               <option value="all">ሁሉም ቅርንጫፎች</option>
               {branches.map((b) => <option key={b._id} value={b._id}>{b.name}</option>)}
             </select>
           ) : (
-            <div className="px-3 py-2 rounded-lg bg-blue-50 text-blue-700 text-sm flex items-center gap-2">
+            <div className="px-3.5 py-2 rounded-xl bg-blue-50/80 border border-blue-100 text-blue-700 text-sm flex items-center gap-2">
               <Building2 size={14} />
               <span className="font-medium truncate">
                 {user?.branch
@@ -312,31 +532,31 @@ export default function ReceiptsPage() {
         </div>
       </Card>
 
-      <Card padding="none">
+      <Card padding="none" className="rounded-2xl border-gray-100 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-200">
+            <thead className="bg-gray-50/90 border-b border-gray-200">
               <tr>
-                <th className="px-4 py-3 text-left font-semibold text-gray-700">ደረሰኝ ቁጥር</th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-700">ደንበኛ</th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-700">ዕቃ</th>
-                <th className="px-4 py-3 text-right font-semibold text-gray-700">ጠቅላላ</th>
-                <th className="px-4 py-3 text-right font-semibold text-gray-700">ቅድመ</th>
-                <th className="px-4 py-3 text-right font-semibold text-gray-700">ቀሪ</th>
-                <th className="px-4 py-3 text-center font-semibold text-gray-700">ሁኔታ</th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-700">ቀን</th>
-                <th className="px-4 py-3 text-center font-semibold text-gray-700">ተግባር</th>
+                <th className="px-4 py-3 text-left font-semibold text-gray-600 text-xs uppercase tracking-wider">ደረሰኝ ቁጥር</th>
+                <th className="px-4 py-3 text-left font-semibold text-gray-600 text-xs uppercase tracking-wider">ደንበኛ</th>
+                <th className="px-4 py-3 text-left font-semibold text-gray-600 text-xs uppercase tracking-wider">ዕቃ</th>
+                <th className="px-4 py-3 text-right font-semibold text-gray-600 text-xs uppercase tracking-wider">ጠቅላላ</th>
+                <th className="px-4 py-3 text-right font-semibold text-gray-600 text-xs uppercase tracking-wider">ቅድመ</th>
+                <th className="px-4 py-3 text-right font-semibold text-gray-600 text-xs uppercase tracking-wider">ቀሪ</th>
+                <th className="px-4 py-3 text-center font-semibold text-gray-600 text-xs uppercase tracking-wider">ሁኔታ</th>
+                <th className="px-4 py-3 text-left font-semibold text-gray-600 text-xs uppercase tracking-wider">ቀን</th>
+                <th className="px-4 py-3 text-center font-semibold text-gray-600 text-xs uppercase tracking-wider">ተግባር</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-gray-100">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="text-center py-12">
-                    <div className="flex flex-col items-center gap-2">
-                      <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center">
-                        <FileText size={28} className="text-gray-400" />
+                  <td colSpan={9} className="text-center py-14">
+                    <div className="flex flex-col items-center gap-2.5">
+                      <div className="w-14 h-14 rounded-2xl bg-gray-100 flex items-center justify-center">
+                        <FileText size={24} className="text-gray-400" />
                       </div>
-                      <p className="text-gray-500 text-sm">
+                      <p className="text-gray-500 text-sm font-medium">
                         {user?.role === 'customer' ? 'የእርስዎ ደረሰኝ የለም' : 'ምንም ደረሰኝ አልተገኘም'}
                       </p>
                     </div>
@@ -346,32 +566,32 @@ export default function ReceiptsPage() {
                 filtered.map((receipt) => {
                   const status = RECEIPT_STATUS[receipt.status] || { label: receipt.status, color: 'gray' };
                   return (
-                    <tr key={receipt._id} className="border-b border-gray-100 hover:bg-gray-50">
-                      <td className="px-4 py-3 font-mono text-xs text-brand font-medium">
+                    <tr key={receipt._id} className="hover:bg-gray-50/80 transition-colors">
+                      <td className="px-4 py-3 font-mono text-xs text-brand font-semibold">
                         {receipt.receiptNumber}
                       </td>
                       <td className="px-4 py-3">
-                        <p className="font-medium text-gray-800">{receipt.customerName}</p>
+                        <p className="font-semibold text-gray-800">{receipt.customerName}</p>
                         <p className="text-xs text-gray-500">{receipt.customerPhone}</p>
                       </td>
                       <td className="px-4 py-3">
-                        <span className="inline-flex px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 text-xs">
+                        <span className="inline-flex px-2.5 py-0.5 rounded-full bg-gray-100 text-gray-700 text-xs font-medium">
                           {receipt.itemType}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-right font-semibold text-gray-800">
                         {formatETB(receipt.totalPrice || 0)}
                       </td>
-                      <td className="px-4 py-3 text-right text-green-600 font-medium">
+                      <td className="px-4 py-3 text-right text-emerald-600 font-semibold">
                         {formatETB(receipt.prepayment || 0)}
                       </td>
-                      <td className="px-4 py-3 text-right text-red-600 font-medium">
+                      <td className="px-4 py-3 text-right text-red-600 font-semibold">
                         {formatETB(receipt.remainingPayment || 0)}
                       </td>
                       <td className="px-4 py-3 text-center">
                         <Badge color={status.color}>{status.label}</Badge>
                       </td>
-                      <td className="px-4 py-3 text-xs text-gray-500">
+                      <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
                         {formatEthiopianDate(receipt.createdAt)}
                       </td>
                       <td className="px-4 py-3">
@@ -441,14 +661,14 @@ export default function ReceiptsPage() {
 
 function StatCard({ label, value, icon: Icon, color }) {
   return (
-    <Card padding="sm">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-xs text-gray-500">{label}</p>
-          <p className="text-xl font-bold text-gray-800 mt-1">{value}</p>
+    <Card padding="sm" className="rounded-2xl border-gray-100 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-medium text-gray-500 truncate">{label}</p>
+          <p className="text-lg sm:text-xl font-bold text-gray-900 mt-1 truncate">{value}</p>
         </div>
-        <div className={'p-2.5 rounded-lg ' + color}>
-          <Icon size={20} className="text-white" />
+        <div className={'p-2.5 rounded-xl flex-shrink-0 shadow-sm ' + color}>
+          <Icon size={19} className="text-white" />
         </div>
       </div>
     </Card>
@@ -514,82 +734,73 @@ function ReceiptForm({ receipt, branches, onSave, onCancel, currentUser }) {
     });
   };
 
+  const inputClass =
+    'w-full px-3 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand text-sm text-gray-800 bg-white transition';
+
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div>
-        <h4 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-          <User size={14} /> የደንበኛ መረጃ
+      <div className="bg-gray-50/70 p-3.5 rounded-xl border border-gray-100">
+        <h4 className="text-xs font-bold uppercase tracking-wider text-gray-600 mb-2.5 flex items-center gap-1.5">
+          <User size={14} className="text-brand" /> የደንበኛ መረጃ
         </h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <FormField label="ስም *">
-            <input name="customerName" value={form.customerName} onChange={onChange} required
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
-            />
+            <input name="customerName" value={form.customerName} onChange={onChange} required className={inputClass} />
           </FormField>
           <FormField label="ስልክ">
-            <input name="customerPhone" value={form.customerPhone} onChange={onChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
-            />
+            <input name="customerPhone" value={form.customerPhone} onChange={onChange} className={inputClass} />
           </FormField>
         </div>
       </div>
 
-      <div>
-        <h4 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-          <FileText size={14} /> የትዕዛዝ መረጃ
+      <div className="bg-gray-50/70 p-3.5 rounded-xl border border-gray-100">
+        <h4 className="text-xs font-bold uppercase tracking-wider text-gray-600 mb-2.5 flex items-center gap-1.5">
+          <FileText size={14} className="text-brand" /> የትዕዛዝ መረጃ
         </h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <FormField label="የትዕዛዝ ቁጥር">
-            <input name="orderNumber" value={form.orderNumber} onChange={onChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
-            />
+            <input name="orderNumber" value={form.orderNumber} onChange={onChange} className={inputClass} />
           </FormField>
           <FormField label="የምርት ኮድ">
-            <input name="productCode" value={form.productCode} onChange={onChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
-            />
+            <input name="productCode" value={form.productCode} onChange={onChange} className={inputClass} />
           </FormField>
           <FormField label="የዕቃ ዓይነት *">
-            <input name="itemType" value={form.itemType} onChange={onChange} required
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
-            />
+            <input name="itemType" value={form.itemType} onChange={onChange} required className={inputClass} />
           </FormField>
           <FormField label="የትዕዛዝ ቀን *">
-            <input type="date" name="orderDate" value={form.orderDate} onChange={onChange} required
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
+            <EthiopianDateInput
+              value={form.orderDate}
+              onChange={(val) => setForm({ ...form, orderDate: val })}
+              required
             />
-            <EthDatePreview value={form.orderDate} />
           </FormField>
           <FormField label="ቀጠሮ ቀን *" full>
-            <input type="date" name="appointmentDate" value={form.appointmentDate} onChange={onChange} required
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
+            <EthiopianDateInput
+              value={form.appointmentDate}
+              onChange={(val) => setForm({ ...form, appointmentDate: val })}
+              required
             />
-            <EthDatePreview value={form.appointmentDate} />
           </FormField>
         </div>
       </div>
 
-      <div>
-        <h4 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-          <DollarSign size={14} /> ክፍያ
+      <div className="bg-gray-50/70 p-3.5 rounded-xl border border-gray-100">
+        <h4 className="text-xs font-bold uppercase tracking-wider text-gray-600 mb-2.5 flex items-center gap-1.5">
+          <DollarSign size={14} className="text-brand" /> ክፍያ
         </h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <FormField label="ጠቅላላ ዋጋ *">
-            <input type="number" name="totalPrice" value={form.totalPrice} onChange={onChange} required min={0}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
-            />
+            <input type="number" name="totalPrice" value={form.totalPrice} onChange={onChange} required min={0} className={inputClass} />
           </FormField>
           <FormField label="ቅድመ ክፍያ *">
-            <input type="number" name="prepayment" value={form.prepayment} onChange={onChange} required min={0}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
-            />
+            <input type="number" name="prepayment" value={form.prepayment} onChange={onChange} required min={0} className={inputClass} />
           </FormField>
         </div>
 
-        <div className="mt-3 bg-blue-50 rounded-lg p-3">
+        <div className="mt-3 bg-blue-50/80 border border-blue-100 rounded-xl p-3">
           <div className="flex justify-between items-center text-sm">
-            <span className="text-gray-600 font-medium">ቀሪ ክፍያ (auto):</span>
-            <span className={'font-bold text-lg ' + (remaining <= 0 ? 'text-green-600' : 'text-red-600')}>
+            <span className="text-gray-700 font-semibold">ቀሪ ክፍያ (auto):</span>
+            <span className={'font-bold text-base ' + (remaining <= 0 ? 'text-emerald-600' : 'text-red-600')}>
               {formatETB(remaining)}
             </span>
           </div>
@@ -598,8 +809,7 @@ function ReceiptForm({ receipt, branches, onSave, onCancel, currentUser }) {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <FormField label="ሁኔታ">
-          <select name="status" value={form.status} onChange={onChange}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800">
+          <select name="status" value={form.status} onChange={onChange} className={inputClass}>
             {Object.entries(RECEIPT_STATUS).map(([k, v]) => (
               <option key={k} value={k}>{v.label || v}</option>
             ))}
@@ -608,12 +818,11 @@ function ReceiptForm({ receipt, branches, onSave, onCancel, currentUser }) {
 
         <FormField label="ቅርንጫፍ *">
           {isSeller ? (
-            <div className="w-full px-3 py-2 rounded-lg bg-blue-50 text-blue-700 text-sm font-medium">
+            <div className="w-full px-3 py-2 rounded-xl bg-blue-50 text-blue-700 text-sm font-medium">
               {typeof currentUser.branch === 'object' ? currentUser.branch?.name : 'ቅርንጫፍ'}
             </div>
           ) : (
-            <select name="branch" value={form.branch} onChange={onChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800">
+            <select name="branch" value={form.branch} onChange={onChange} className={inputClass}>
               <option value="">— ይምረጡ —</option>
               {branches.length === 0 ? (
                 <option value="" disabled>ቅርንጫፍ በመጫን ላይ...</option>
@@ -627,17 +836,17 @@ function ReceiptForm({ receipt, branches, onSave, onCancel, currentUser }) {
 
       <FormField label="ማስታወሻ">
         <textarea name="note" value={form.note} onChange={onChange} rows={3}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm resize-none text-gray-800 bg-white"
+          className={inputClass + ' resize-none'}
         />
       </FormField>
 
-      <div className="flex gap-2 pt-2 border-t border-gray-200">
+      <div className="flex gap-2.5 pt-3 border-t border-gray-100">
         <button type="button" onClick={onCancel}
-          className="flex-1 px-4 py-2.5 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 transition">
+          className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-gray-700 font-semibold hover:bg-gray-50 transition">
           ሰርዝ
         </button>
         <button type="submit"
-          className="flex-1 px-4 py-2.5 rounded-lg bg-brand text-white font-semibold hover:bg-brand-dark transition">
+          className="flex-1 px-4 py-2.5 rounded-xl bg-brand text-white font-semibold hover:bg-brand-dark shadow-sm transition">
           {receipt ? 'አስተካክል' : 'ፍጠር'}
         </button>
       </div>
@@ -648,7 +857,7 @@ function ReceiptForm({ receipt, branches, onSave, onCancel, currentUser }) {
 function FormField({ label, children, full }) {
   return (
     <div className={full ? 'md:col-span-2' : ''}>
-      <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+      <label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>
       {children}
     </div>
   );
@@ -659,18 +868,18 @@ function ReceiptView({ receipt, onPrint, onDownload }) {
 
   return (
     <div>
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
         <div className="bg-gradient-to-r from-brand to-brand-dark text-white p-5">
-          <div className="flex items-center justify-between">
+          <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-xl font-bold">ግሩም ምጣድ</h2>
-              <p className="text-xs text-blue-100">Grum Stove</p>
-              <p className="text-xs text-blue-100 mt-1">አዲስ አበባ, ኢትዮጵያ</p>
-              <p className="text-xs text-blue-100">0924 254 988 · 0903 284 493</p>
+              <h2 className="text-lg font-bold leading-snug">ግሩም ዘመናዊ የኤሌክትሪክ እና ማገዶ ቆጣቢ ምጣድ</h2>
+              <p className="text-xs text-blue-100 font-semibold mt-0.5">GRUM STOVE &amp; MANUFACTURING</p>
+              <p className="text-xs text-blue-100 mt-1">አዲስ አበባ · ቦሌ ክ/ከተማ</p>
+              <p className="text-xs text-blue-100">0924 254 988 · 0903 284 493 · info@grumstove.com</p>
             </div>
-            <div className="text-right">
-              <p className="text-xs text-blue-100 uppercase tracking-wider">ደረሰኝ ቁጥር</p>
-              <p className="font-mono font-bold text-lg">{receipt.receiptNumber}</p>
+            <div className="text-right flex-shrink-0">
+              <p className="text-[11px] text-blue-100 uppercase tracking-wider">ደረሰኝ ቁጥር</p>
+              <p className="font-mono font-bold text-base">{receipt.receiptNumber}</p>
               <p className="text-xs text-blue-100 mt-1">{formatEthiopianDate(receipt.createdAt)}</p>
             </div>
           </div>
@@ -678,38 +887,34 @@ function ReceiptView({ receipt, onPrint, onDownload }) {
 
         <div className="p-5 space-y-4">
           <div className="grid grid-cols-2 gap-3">
-            <div className="bg-gray-50 rounded-lg p-3">
+            <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
               <p className="text-xs text-gray-500 mb-1">ደንበኛ</p>
               <p className="font-semibold text-gray-800">{receipt.customerName}</p>
               {receipt.customerPhone && (
-                <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
-                  <Phone size={10} /> {receipt.customerPhone}
-                </p>
+                <p className="text-xs text-gray-500 mt-0.5">{receipt.customerPhone}</p>
               )}
             </div>
-            <div className="bg-gray-50 rounded-lg p-3">
+            <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
               <p className="text-xs text-gray-500 mb-1">ሁኔታ</p>
               <Badge color={status.color}>{status.label}</Badge>
               {receipt.branch?.name && (
-                <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
-                  <Building2 size={10} /> {receipt.branch.name}
-                </p>
+                <p className="text-xs text-gray-500 mt-1">{receipt.branch.name}</p>
               )}
             </div>
           </div>
 
-          <div className="bg-gray-50 rounded-lg p-3">
+          <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200">
-                  <th className="text-left py-2 text-xs font-semibold text-gray-600 uppercase">ዕቃ</th>
-                  <th className="text-right py-2 text-xs font-semibold text-gray-600 uppercase">መጠን</th>
+                  <th className="text-left py-1.5 text-xs font-semibold text-gray-600 uppercase">ዕቃ</th>
+                  <th className="text-right py-1.5 text-xs font-semibold text-gray-600 uppercase">መጠን</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
                   <td className="py-2 text-gray-800">
-                    {receipt.itemType}
+                    <span className="font-medium">{receipt.itemType}</span>
                     {receipt.productCode && (
                       <p className="text-xs text-gray-500 font-mono">ኮድ: {receipt.productCode}</p>
                     )}
@@ -717,7 +922,7 @@ function ReceiptView({ receipt, onPrint, onDownload }) {
                       <p className="text-xs text-gray-500 font-mono">ትዕዛዝ: {receipt.order.orderNumber}</p>
                     )}
                   </td>
-                  <td className="py-2 text-right text-gray-800 font-medium">
+                  <td className="py-2 text-right text-gray-800 font-semibold">
                     {formatETB(receipt.totalPrice || 0)}
                   </td>
                 </tr>
@@ -725,22 +930,22 @@ function ReceiptView({ receipt, onPrint, onDownload }) {
             </table>
           </div>
 
-          <div className="space-y-1.5 text-sm">
+          <div className="space-y-1.5 text-sm bg-gray-50/60 p-3.5 rounded-xl border border-gray-100">
             <div className="flex justify-between">
               <span className="text-gray-600">ጠቅላላ ዋጋ</span>
               <span className="font-semibold text-gray-800">{formatETB(receipt.totalPrice || 0)}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-gray-600">ቅድመ ክፍያ</span>
-              <span className="font-semibold text-green-600">{formatETB(receipt.prepayment || 0)}</span>
+              <span className="font-semibold text-emerald-600">{formatETB(receipt.prepayment || 0)}</span>
             </div>
             <div className="flex justify-between pt-2 border-t border-gray-200">
               <span className="font-semibold text-gray-700">ቀሪ ክፍያ</span>
-              <span className="font-bold text-red-600 text-lg">{formatETB(receipt.remainingPayment || 0)}</span>
+              <span className="font-bold text-red-600 text-base">{formatETB(receipt.remainingPayment || 0)}</span>
             </div>
           </div>
 
-          <div className="text-xs text-gray-500 space-y-0.5 border-t border-gray-100 pt-3">
+          <div className="text-xs text-gray-500 space-y-1 border-t border-gray-100 pt-3">
             {receipt.orderDate && <p>የትዕዛዝ ቀን: {formatEthiopianDate(receipt.orderDate)}</p>}
             <p>ቀጠሮ ቀን: {formatEthiopianDate(receipt.appointmentDate)}</p>
             <p>ቅርንጫፍ: {receipt.branch?.name || '-'}</p>
@@ -748,23 +953,23 @@ function ReceiptView({ receipt, onPrint, onDownload }) {
           </div>
 
           {receipt.note && (
-            <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800 leading-relaxed">
-              ⚠️ {receipt.note}
+            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 leading-relaxed">
+              {receipt.note}
             </div>
           )}
         </div>
       </div>
 
-      <div className="mt-4 flex gap-2">
+      <div className="mt-4 flex gap-2.5">
         <button
           onClick={onDownload}
-          className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-gray-900 text-white font-semibold hover:bg-gray-800 transition"
+          className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gray-900 text-white font-semibold hover:bg-gray-800 transition"
         >
           <Download size={16} /> አውርድ PDF
         </button>
         <button
           onClick={onPrint}
-          className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-brand text-white font-semibold hover:bg-brand-dark transition"
+          className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-brand text-white font-semibold hover:bg-brand-dark transition"
         >
           <Printer size={16} /> አትም
         </button>
@@ -778,173 +983,322 @@ function buildReceiptHTML(receipt, forPrint) {
     String(v ?? '')
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
 
-  const money = (n) =>
-    (n || 0).toLocaleString('en-US', { minimumFractionDigits: 2 });
+  const fmtAmount = (val) => {
+    const n = Number(val) || 0;
+    return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
 
-  const status = esc(RECEIPT_STATUS[receipt.status]?.label || receipt.status || '-');
-  const createdAt = formatEthiopianDate(receipt.createdAt);
-  const orderDate = formatEthiopianDate(receipt.orderDate || receipt.createdAt);
-  const appointmentDate = formatEthiopianDate(receipt.appointmentDate);
-  const total = money(receipt.totalPrice);
-  const prepay = money(receipt.prepayment);
-  const remaining = money(receipt.remainingPayment);
-  const branch = esc(receipt.branch?.name || '-');
-  const customer = esc(receipt.customerName || '-');
-  const phone = esc(receipt.customerPhone || '-');
-  const itemType = esc(receipt.itemType || '-');
-  const productCode = esc(receipt.productCode || '-');
-  const note = esc(receipt.note || '');
-  const receiptNum = esc(receipt.receiptNumber || '-');
+  const receiptNo = receipt.receiptNumber || '';
+  const statusText = (receipt.status || 'ACTIVE').toUpperCase();
+  const branchName = receipt.branch?.name || '';
+  const customerName = receipt.customerName || '';
+  const customerPhone = receipt.customerPhone || '';
+  const itemType = receipt.itemType || '';
+  const productCode = receipt.productCode || '';
+  const qty = Number(receipt.quantity ?? receipt.order?.quantity ?? 1) || 1;
+  const totalPrice = Number(receipt.totalPrice) || 0;
+  const prepayment = Number(receipt.prepayment) || 0;
+  const remaining = receipt.remainingPayment !== undefined && receipt.remainingPayment !== null
+    ? Number(receipt.remainingPayment)
+    : Math.max(totalPrice - prepayment, 0);
+
+  const issuedEthDate = formatEthiopianDate(receipt.createdAt);
+  const orderEthDate = formatEthiopianDate(receipt.orderDate || receipt.createdAt);
+  const appointmentEthDate = formatEthiopianDate(receipt.appointmentDate);
+  const noteText = receipt.note || '';
+  const issuedByName = receipt.issuedBy?.fullName || 'Admin User';
 
   return `<!DOCTYPE html>
 <html lang="am">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>${receiptNum}</title>
+  <meta charset="UTF-8" />
+  <title>ደረሰኝ</title>
   <style>
-    /* margin: 0 removes the browser's own date / title / file path / page number */
-    @page { size: A4 portrait; margin: 0; }
-    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    html, body {
-      font-family: 'Noto Sans Ethiopic', 'Nyala', 'Abyssinica SIL', 'Segoe UI', Arial, sans-serif;
-      background: #fff;
-      color: #111827;
-      font-size: 14px;
-      line-height: 1.45;
+    @page {
+      size: A4 portrait;
+      margin: 0;
     }
-    body { padding: 10mm; }
-    .receipt { width: 100%; max-width: 190mm; margin: 0 auto; page-break-inside: avoid; break-inside: avoid; }
-
-    /* Barcode */
-    .barcode-wrap { text-align: center; padding: 3mm 0 2mm; border-bottom: 1px dashed #d1d5db; }
-    .barcode { font-family: 'Libre Barcode 128', 'Courier New', monospace; font-size: 30px; line-height: 1; letter-spacing: 1.5px; }
-
-    /* Header */
-    .header { text-align: center; padding: 3mm 0; border-bottom: 1px solid #d1d5db; }
-    .brand-am { font-size: 15px; font-weight: 800; color: #0f766e; }
-    .brand-en { font-size: 14px; font-weight: 700; color: #0f766e; letter-spacing: 1.5px; margin: 0.5mm 0; }
-    .brand-addr, .brand-contact { font-size: 13px; color: #4b5563; }
-
-    /* Meta */
-    .meta { padding: 3mm 0; border-bottom: 1px dashed #d1d5db; display: flex; justify-content: space-between; align-items: flex-start; }
-    .meta-line { margin: 0.5mm 0; }
-    .meta-line strong { color: #111827; }
-    .status { display: inline-block; background: #10b981; color: #fff; font-size: 13px; font-weight: 800; padding: 0.8mm 3mm; border-radius: 1mm; margin-top: 1mm; }
-
-    /* Sections */
-    .sec { padding: 3mm 0; border-bottom: 1px dashed #d1d5db; }
-    .sec-title { font-size: 14px; font-weight: 800; margin-bottom: 1mm; }
-    .sec-line { margin: 0.8mm 0; padding-left: 2mm; }
-    .sec-line strong { color: #111827; }
-
-    /* Item list = the only table */
-    .items { width: 100%; border-collapse: collapse; margin-top: 1.5mm; }
-    .items th { background: #f3f4f6; padding: 2mm 3mm; text-align: left; font-size: 13px; font-weight: 700; border: 1px solid #d1d5db; }
-    .items td { padding: 2.5mm 3mm; border: 1px solid #d1d5db; font-size: 14px; }
-    .items .c { text-align: center; }
-    .items .r { text-align: right; font-family: 'Courier New', monospace; font-weight: 600; }
-    .items .mono { font-family: 'Courier New', monospace; }
-
-    /* Payment with dotted leaders */
-    .pay-row { display: flex; align-items: baseline; margin: 1.2mm 0; }
-    .pay-row .dots { flex: 1; border-bottom: 1px dotted #9ca3af; margin: 0 1.5mm; height: 1px; }
-    .pay-row .val { font-family: 'Courier New', monospace; font-weight: 700; }
-    .pay-row.prepaid .val { color: #059669; }
-    .pay-row.remaining .val { color: #dc2626; font-weight: 800; }
-
-    /* Notes */
-    .note, .notice { margin-top: 3mm; padding: 3mm 4mm; font-size: 13px; line-height: 1.5; border-left: 3px solid; }
-    .note { background: #fef3c7; border-color: #f59e0b; color: #78350f; }
-    .notice { background: #fef2f2; border-color: #dc2626; color: #7f1d1d; }
-    .notice .phone { margin-top: 1.5mm; padding-top: 1mm; border-top: 1px dashed #fca5a5; font-weight: 700; }
-
-    .thanks { text-align: center; margin-top: 4mm; font-size: 14px; font-weight: 800; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Noto Sans Ethiopic', system-ui, -apple-system, sans-serif;
+      margin: 0;
+      padding: 0;
+      color: #0f172a;
+      background: #ffffff;
+      font-size: 12px;
+      line-height: 1.45;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .wrap {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 12mm 14mm;
+    }
+    .box {
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 14px 16px;
+      background: #ffffff;
+    }
+    .header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 20px;
+      padding-bottom: 10px;
+      border-bottom: 1.5px solid #1e293b;
+    }
+    .company-am {
+      font-size: 15px;
+      font-weight: 700;
+      margin: 0;
+      color: #0f172a;
+    }
+    .company-en {
+      font-size: 11px;
+      font-weight: 700;
+      margin: 2px 0 6px;
+      color: #334155;
+      letter-spacing: 0.03em;
+    }
+    .company-lines {
+      font-size: 11px;
+      line-height: 1.5;
+      color: #334155;
+    }
+    .meta-right {
+      text-align: right;
+      font-size: 11px;
+      min-width: 150px;
+    }
+    .meta-lbl {
+      font-size: 10px;
+      color: #64748b;
+    }
+    .meta-val {
+      font-weight: 700;
+      font-size: 12px;
+      color: #0f172a;
+      margin-bottom: 5px;
+    }
+    .status-tag {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 1px 7px;
+      border-radius: 4px;
+      border: 1px solid #94a3b8;
+      background: #f8fafc;
+      color: #0f172a;
+      margin-bottom: 5px;
+    }
+    .block {
+      margin-top: 10px;
+      padding: 9px 11px;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      background: #fcfcfd;
+    }
+    .block-title {
+      font-weight: 700;
+      font-size: 12px;
+      margin-bottom: 5px;
+      color: #0f172a;
+    }
+    .line-pair {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      margin: 2px 0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 4px;
+      font-size: 11.5px;
+      background: #ffffff;
+    }
+    th, td {
+      border: 1px solid #cbd5e1;
+      padding: 6px 8px;
+      text-align: left;
+    }
+    th {
+      font-weight: 700;
+      background: #f1f5f9;
+      color: #0f172a;
+    }
+    .c { text-align: center; }
+    .r { text-align: right; font-variant-numeric: tabular-nums; }
+    .summary-box {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 20px;
+      margin-top: 10px;
+    }
+    .dates-side {
+      flex: 1;
+      padding: 9px 11px;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      background: #fcfcfd;
+      font-size: 11px;
+    }
+    .dates-side .line-pair {
+      justify-content: flex-start;
+      gap: 14px;
+      margin-bottom: 6px;
+    }
+    .dates-side .line-pair:last-child {
+      margin-bottom: 0;
+    }
+    .amounts-side {
+      width: 245px;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 6px 10px;
+      background: #ffffff;
+      font-size: 11.5px;
+    }
+    .amt-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 4px 0;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .amt-row.last {
+      font-weight: 700;
+      border-bottom: none;
+      padding-top: 6px;
+      margin-top: 2px;
+      border-top: 1px solid #94a3b8;
+    }
+    .text-block {
+      margin-top: 10px;
+      padding: 8px 11px;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      background: #fcfcfd;
+      font-size: 11px;
+    }
+    .footer-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 16px;
+      margin-top: 18px;
+      padding-top: 8px;
+      border-top: 1px dashed #cbd5e1;
+      font-size: 11px;
+    }
+    .sign-col {
+      border-top: 1px solid #334155;
+      padding-top: 4px;
+      min-width: 140px;
+    }
+    .issued-col {
+      text-align: center;
+    }
+    .org-col {
+      text-align: right;
+    }
   </style>
 </head>
 <body>
-  <div class="receipt">
-
-    <!-- Barcode -->
-    <div class="barcode-wrap">
-      <div class="barcode">*${receiptNum}*</div>
-    </div>
-
-    <!-- Header -->
-    <div class="header">
-      <div class="brand-am">ግሩም ዘመናዊ የኤሌክትሪክ እና ማገዶ ቆጣቢ ምጣድ</div>
-      <div class="brand-en">GRUM STOVE &amp; MANUFACTURING</div>
-      <div class="brand-addr">📍 አዲስ አበባ · ቦሌ ክ/ከተማ</div>
-      <div class="brand-contact">📞 0924 254 988 · 0903 284 493</div>
-    </div>
-
-    <!-- Meta -->
-    <div class="meta">
-      <div>
-        <div class="meta-line">ደረሰኝ ቁጥር: <strong>${receiptNum}</strong></div>
-        <div class="meta-line">የተሰጠ ቀን: <strong>${createdAt}</strong></div>
-        <div class="status">${status}</div>
+  <div class="wrap">
+    <div class="box">
+      <div class="header-row">
+        <div>
+          <div class="company-am">ግሩም ዘመናዊ የኤሌክትሪክ እና ማገዶ ቆጣቢ ምጣድ</div>
+          <div class="company-en">GRUM STOVE &amp; MANUFACTURING</div>
+          <div class="company-lines">
+            <div>አዲስ አበባ · ቦሌ ክ/ከተማ</div>
+            <div>0924 254 988</div>
+            <div>0903 284 493</div>
+            <div>info@grumstove.com</div>
+          </div>
+        </div>
+        <div class="meta-right">
+          <div class="meta-lbl">ደረሰኝ ቁጥር</div>
+          <div class="meta-val">${esc(receiptNo)}</div>
+          <div class="meta-lbl">የተሰጠ ቀን</div>
+          <div class="meta-val">${esc(issuedEthDate)}</div>
+          <div class="status-tag">${esc(statusText)}</div>
+          <div class="meta-lbl">ቅርንጫፍ</div>
+          <div class="meta-val" style="margin-bottom:0">${esc(branchName)}</div>
+        </div>
       </div>
-      <div class="meta-line">ቅርንጫፍ: <strong>${branch}</strong></div>
+
+      <div class="block">
+        <div class="block-title">የደንበኛ መረጃ</div>
+        <div class="line-pair"><span>ስም</span><span>${esc(customerName)}</span></div>
+        <div class="line-pair"><span>ስልክ</span><span>${esc(customerPhone)}</span></div>
+      </div>
+
+      <div class="block">
+        <div class="block-title">የትዕዛዝ ዝርዝር</div>
+        <table>
+          <thead>
+            <tr>
+              <th>ዕቃ</th>
+              <th>ኮድ</th>
+              <th class="c">ብዛት</th>
+              <th class="r">ዋጋ (ETB)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>${esc(itemType)}</td>
+              <td>${esc(productCode)}</td>
+              <td class="c">${esc(qty)}</td>
+              <td class="r">${esc(fmtAmount(totalPrice))}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="summary-box">
+        <div class="dates-side">
+          <div class="line-pair"><span>የትዕዛዝ ቀን</span><span>${esc(orderEthDate)}</span></div>
+          <div class="line-pair"><span>ቀጠሮ ቀን</span><span>${esc(appointmentEthDate)}</span></div>
+        </div>
+        <div class="amounts-side">
+          <div class="amt-row"><span>ጠቅላላ ዋጋ</span><span>ብር ${esc(fmtAmount(totalPrice))}</span></div>
+          <div class="amt-row"><span>ቅድመ ክፍያ</span><span>ብር ${esc(fmtAmount(prepayment))}</span></div>
+          <div class="amt-row last"><span>ቀሪ ክፍያ</span><span>ብር ${esc(fmtAmount(remaining))}</span></div>
+        </div>
+      </div>
+
+      ${noteText ? `
+      <div class="text-block">
+        <div class="block-title">ማስታወሻ</div>
+        <div>${esc(noteText)}</div>
+      </div>` : ''}
+
+      <div class="text-block">
+        <div class="block-title">ማሳሰቢያ</div>
+        <div>የተከፈለው ቅድመ ክፍያ (ክብድ) የቆይታ ጊዜው 2 ወር ነው። በዚሁ ጊዜ ውስጥ ዕቃውን ካልተረከቡ ወይም የጥሬ ዕቃ ዋጋ ጭማሪ ካጋጠመ፣ የዋጋው ልዩነት ታስቦ የሚስተካከል መሆኑን እንገልጻለን።</div>
+        <div style="margin-top:6px">0924254988/0903284493</div>
+        <div>ስለመረጡን እናመሰግናለን!</div>
+      </div>
+
+      <div class="footer-row">
+        <div class="sign-col">የደንበኛ ፊርማ</div>
+        <div class="issued-col">
+          <div>ደረሰኝ በ ${esc(issuedByName)} ተዘጋጅቷል</div>
+          <div class="meta-lbl">${esc(issuedByName)} /ISSUED BY</div>
+        </div>
+        <div class="org-col">
+          <div>${esc(issuedEthDate)}</div>
+          <div>GRUM STOVE ADDIS ABABA</div>
+        </div>
+      </div>
     </div>
-
-    <!-- Customer -->
-    <div class="sec">
-      <div class="sec-title">👤 የደንበኛ መረጃ:</div>
-      <div class="sec-line">• ስም: <strong>${customer}</strong></div>
-      <div class="sec-line">• ስልክ: <strong>${phone}</strong></div>
-    </div>
-
-    <!-- Items (table) -->
-    <div class="sec">
-      <div class="sec-title">📦 የዕቃ ዝርዝር:</div>
-      <table class="items">
-        <thead>
-          <tr>
-            <th>የዕቃ ዓይነት</th>
-            <th>ኮድ</th>
-            <th class="c">ብዛት</th>
-            <th style="text-align:right">ዋጋ (ETB)</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>${itemType}</td>
-            <td class="mono">${productCode}</td>
-            <td class="c">1</td>
-            <td class="r">${total}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <!-- Payment -->
-    <div class="sec">
-      <div class="sec-title">💰 የክፍያ ማጠቃለያ:</div>
-      <div class="pay-row"><span>• ጠቅላላ ዋጋ:</span><span class="dots"></span><span class="val">ብር ${total}</span></div>
-      <div class="pay-row prepaid"><span>• ቅድመ ክፍያ (ከፍለው):</span><span class="dots"></span><span class="val">ብር ${prepay}</span></div>
-      <div class="pay-row remaining"><span>• ቀሪ ክፍያ:</span><span class="dots"></span><span class="val">ብር ${remaining}</span></div>
-    </div>
-
-    <!-- Schedule -->
-    <div class="sec">
-      <div class="sec-title">📅 የቀጠሮ እና የጊዜ ሰሌዳ:</div>
-      <div class="sec-line">• የትዕዛዝ ቀን: <strong>${orderDate}</strong></div>
-      <div class="sec-line">• የቀጠሮ ቀን: <strong>${appointmentDate}</strong></div>
-      <div class="sec-line">• የተሰጠ ቀን: <strong>${createdAt}</strong></div>
-    </div>
-
-    ${note ? `<div class="note"><b>⚠️ ማስታወሻ:</b> ${note}</div>` : ''}
-
-    <div class="notice">
-      <b>⚠️ ማሳሰቢያ:</b>
-      የተከፈለው ቅድመ ክፍያ (ክብድ) የቆይታ ጊዜው <b>2 ወር</b> ነው። በዚሁ ጊዜ ውስጥ ዕቃውን ካልተረከቡ ወይም የጥሬ ዕቃ ዋጋ ጭማሪ ካጋጠመ፣ የዋጋው ልዩነት ታስቦ የሚስተካከል መሆኑን እንገልጻለን።
-      <div class="phone">📞 ስልክ ቁጥር: 0924254988 / 0903284493</div>
-    </div>
-
-    <div class="thanks">ስለመረጡን እናመሰግናለን! 🙏</div>
   </div>
 </body>
 </html>`;

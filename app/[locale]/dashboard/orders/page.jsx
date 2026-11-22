@@ -7,7 +7,7 @@ import {
   DollarSign, Calendar, User, Phone, MapPin, Building2,
   Play, Truck, Wallet,
 } from 'lucide-react';
-import { formatETB, formatDate } from '@/lib/utils';
+import { formatETB } from '@/lib/utils';
 import { ORDER_STATUS, ORDER_ITEM_TYPES } from '@/lib/constants';
 import { apiFetch } from '@/lib/api';
 import Card from '@/components/ui/Card';
@@ -17,6 +17,259 @@ import Modal from '@/components/ui/Modal';
 import ConfirmModal from '@/components/ui/ConfirmModal';
 import ActionButtons from '@/components/ui/ActionButtons';
 import toast from 'react-hot-toast';
+
+const ETHIOPIAN_TIME_ZONE = 'Africa/Addis_Ababa';
+
+const ETHIOPIAN_MONTHS = [
+  { value: 1,  label: 'መስከረም' },
+  { value: 2,  label: 'ጥቅምት' },
+  { value: 3,  label: 'ኅዳር' },
+  { value: 4,  label: 'ታኅሣሥ' },
+  { value: 5,  label: 'ጥር' },
+  { value: 6,  label: 'የካቲት' },
+  { value: 7,  label: 'መጋቢት' },
+  { value: 8,  label: 'ሚያዝያ' },
+  { value: 9,  label: 'ግንቦት' },
+  { value: 10, label: 'ሰኔ' },
+  { value: 11, label: 'ሐምሌ' },
+  { value: 12, label: 'ነሐሴ' },
+  { value: 13, label: 'ጳጉሜን' },
+];
+
+const ETHIOPIAN_WEEKDAYS_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function formatEthiopianDate(input, options = {}) {
+  if (!input) return '-';
+  const date = input instanceof Date ? input : new Date(input);
+  if (Number.isNaN(date.getTime())) return String(input);
+
+  try {
+    return new Intl.DateTimeFormat('am-ET-u-ca-ethiopic', {
+      timeZone: ETHIOPIAN_TIME_ZONE,
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      ...options,
+    }).format(date);
+  } catch {
+    return date.toLocaleDateString('am-ET', {
+      timeZone: ETHIOPIAN_TIME_ZONE,
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      ...options,
+    });
+  }
+}
+
+function toUtcNoonDate(isoStr) {
+  if (!isoStr) return new Date(NaN);
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(isoStr).trim());
+  if (match) {
+    return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12, 0, 0));
+  }
+  const d = new Date(isoStr);
+  if (Number.isNaN(d.getTime())) return new Date(NaN);
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 12, 0, 0));
+}
+
+function toIsoDateFromUtc(date) {
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(date.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function getEthDateParts(isoStr) {
+  const date = toUtcNoonDate(isoStr);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const weekdayStr = new Intl.DateTimeFormat('en-US', {
+    timeZone: ETHIOPIAN_TIME_ZONE,
+    weekday: 'short',
+  }).format(date);
+  const dow = ETHIOPIAN_WEEKDAYS_EN.indexOf(weekdayStr);
+
+  try {
+    const parts = new Intl.DateTimeFormat('en-u-ca-ethiopic', {
+      timeZone: ETHIOPIAN_TIME_ZONE,
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+    }).formatToParts(date);
+
+    const year = Number(parts.find((p) => p.type === 'year')?.value);
+    const month = Number(parts.find((p) => p.type === 'month')?.value);
+    const day = Number(parts.find((p) => p.type === 'day')?.value);
+    if (year && month && day) {
+      return { year, month, day, dow: dow >= 0 ? dow : 0 };
+    }
+  } catch {
+    // Fallback handled below
+  }
+  return null;
+}
+
+function ethToGregorianIso(ethYear, ethMonth, ethDay) {
+  const isLeap = (ethYear + 1) % 4 === 0;
+  const maxDay = ethMonth === 13 ? (isLeap ? 6 : 5) : 30;
+  const clampedDay = Math.min(Math.max(1, ethDay), maxDay);
+
+  // Approx Gregorian date in Addis Ababa for (ethYear, ethMonth, clampedDay)
+  let gYear = ethYear + 7;
+  let gMonth = ethMonth + 8;
+  if (gMonth > 12) {
+    gMonth -= 12;
+    gYear += 1;
+  }
+
+  let candidate = new Date(Date.UTC(gYear, gMonth - 1, Math.min(clampedDay + 10, 28), 12, 0, 0));
+  for (let i = -15; i <= 15; i++) {
+    const test = new Date(candidate.getTime() + i * 86400000);
+    const p = getEthDateParts(toIsoDateFromUtc(test));
+    if (p && p.year === ethYear && p.month === ethMonth && p.day === clampedDay) {
+      return toIsoDateFromUtc(test);
+    }
+  }
+  return toIsoDateFromUtc(candidate);
+}
+
+function getEthMonthDays(ethYear, ethMonth) {
+  const isLeap = (ethYear + 1) % 4 === 0;
+  const totalDays = ethMonth === 13 ? (isLeap ? 6 : 5) : 30;
+  const days = [];
+  for (let d = 1; d <= totalDays; d++) {
+    const iso = ethToGregorianIso(ethYear, ethMonth, d);
+    const parts = getEthDateParts(iso);
+    days.push({ day: d, iso, dow: parts ? parts.dow : 0 });
+  }
+  return days;
+}
+
+function EthiopianDateInput({ value, onChange, required = false }) {
+  const initialParts = useMemo(() => {
+    const p = getEthDateParts(value);
+    return p || { year: 2019, month: 3, day: 13, dow: 0 };
+  }, [value]);
+
+  const [open, setOpen] = useState(false);
+  const [viewYear, setViewYear] = useState(initialParts.year);
+  const [viewMonth, setViewMonth] = useState(initialParts.month);
+
+  useEffect(() => {
+    const p = getEthDateParts(value);
+    if (p) {
+      setViewYear(p.year);
+      setViewMonth(p.month);
+    }
+  }, [value]);
+
+  const monthDays = useMemo(() => getEthMonthDays(viewYear, viewMonth), [viewYear, viewMonth]);
+  const leadingBlanks = monthDays.length > 0 ? monthDays[0].dow : 0;
+
+  const selectDate = (iso) => {
+    onChange(iso);
+    setOpen(false);
+  };
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 flex items-center justify-between gap-2 text-left"
+      >
+        <span className={value ? 'text-gray-800' : 'text-gray-400'}>
+          {value ? formatEthiopianDate(value) : 'የኢትዮጵያ ቀን ይምረጡ'}
+        </span>
+        <Calendar size={15} className="text-gray-400 flex-shrink-0" />
+      </button>
+      {required && (
+        <input
+          type="text"
+          tabIndex={-1}
+          aria-hidden="true"
+          value={value || ''}
+          onChange={() => {}}
+          required
+          className="sr-only"
+        />
+      )}
+
+      {open && (
+        <div className="absolute z-30 mt-1.5 w-72 bg-white border border-gray-200 rounded-xl shadow-lg p-3">
+          <div className="flex items-center justify-between gap-2 mb-2.5">
+            <select
+              value={viewMonth}
+              onChange={(e) => setViewMonth(Number(e.target.value))}
+              className="px-2 py-1 border border-gray-300 rounded-lg text-xs font-medium text-gray-800 bg-white focus:outline-none focus:ring-1 focus:ring-brand"
+            >
+              {ETHIOPIAN_MONTHS.map((m) => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
+            <input
+              type="number"
+              value={viewYear}
+              onChange={(e) => setViewYear(Number(e.target.value) || 2019)}
+              className="w-20 px-2 py-1 border border-gray-300 rounded-lg text-xs font-medium text-gray-800 bg-white focus:outline-none focus:ring-1 focus:ring-brand"
+            />
+          </div>
+
+          <div className="grid grid-cols-7 text-center text-[10px] font-semibold text-gray-400 mb-1">
+            <span>እሑድ</span>
+            <span>ሰኞ</span>
+            <span>ማክሰ</span>
+            <span>ረቡዕ</span>
+            <span>ሐሙስ</span>
+            <span>ዓርብ</span>
+            <span>ቅዳሜ</span>
+          </div>
+
+          <div className="grid grid-cols-7 gap-1 text-center text-xs">
+            {Array.from({ length: leadingBlanks }).map((_, idx) => (
+              <span key={`b-${idx}`} />
+            ))}
+            {monthDays.map((d) => {
+              const isSelected = value === d.iso;
+              return (
+                <button
+                  key={d.day}
+                  type="button"
+                  onClick={() => selectDate(d.iso)}
+                  className={`h-7 w-full rounded-lg text-xs font-medium transition ${
+                    isSelected
+                      ? 'bg-brand text-white font-bold'
+                      : 'text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  {d.day}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-gray-100 text-xs">
+            <button
+              type="button"
+              onClick={() => selectDate(toIsoDateFromUtc(new Date()))}
+              className="text-brand font-medium hover:underline"
+            >
+              ዛሬ
+            </button>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="text-gray-500 hover:text-gray-700"
+            >
+              ዝጋ
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // Minimum prepayment amount
 const MIN_PREPAYMENT = 1000;
@@ -336,7 +589,7 @@ export default function OrdersPage() {
                         <Badge color={status.color}>{status.label}</Badge>
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-500">
-                        {formatDate(order.appointmentDate)}
+                        {formatEthiopianDate(order.appointmentDate)}
                       </td>
                       <td className="px-4 py-3">
                         <ActionButtons
@@ -478,7 +731,7 @@ function RemainingCell({ order, onAdd }) {
       <button
         type="button"
         onClick={() => { setOpen(false); setAmount(''); }}
-        className="px-1 py-1 rounded text-gray-400 hover:text-gray-600 text-xs"
+        className="px-1.5 py-1 rounded text-gray-400 hover:text-gray-600 text-xs"
         title="ሰርዝ"
       >✕</button>
     </div>
@@ -544,6 +797,11 @@ function OrderForm({ order, branches, onSave, onCancel, currentUser }) {
   const handleSubmit = (e) => {
     e.preventDefault();
 
+    if (!form.itemType.trim()) {
+      toast.error('የዕቃ ዓይነት ያስገቡ');
+      return;
+    }
+
     // ---- Prepayment validation ----
     if (!form.prepayment || form.prepayment < MIN_PREPAYMENT) {
       toast.error(`ቅድመ ክፍያ ቢያንስ ${formatETB(MIN_PREPAYMENT)} መሆን አለበት`);
@@ -558,7 +816,7 @@ function OrderForm({ order, branches, onSave, onCancel, currentUser }) {
       customerName: form.customerName,
       customerPhone: form.customerPhone,
       address: form.address,
-      itemType: form.itemType,
+      itemType: form.itemType.trim(),
       quantity: form.quantity,
       unitPrice: form.unitPrice,
       totalPrice,
@@ -606,10 +864,21 @@ function OrderForm({ order, branches, onSave, onCancel, currentUser }) {
         </h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <FormField label="የዕቃ ዓይነት *">
-            <select name="itemType" value={form.itemType} onChange={onChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800">
-              {ORDER_ITEM_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
+            <input
+              type="text"
+              name="itemType"
+              list="order-item-types"
+              value={form.itemType}
+              onChange={onChange}
+              required
+              placeholder="የዕቃ ዓይነት ያስገቡ..."
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800"
+            />
+            {Array.isArray(ORDER_ITEM_TYPES) && ORDER_ITEM_TYPES.length > 0 && (
+              <datalist id="order-item-types">
+                {ORDER_ITEM_TYPES.map((t) => <option key={t} value={t} />)}
+              </datalist>
+            )}
           </FormField>
           <FormField label="ብዛት *">
             <input type="number" name="quantity" value={form.quantity} onChange={onChange} required min={1}
@@ -622,13 +891,17 @@ function OrderForm({ order, branches, onSave, onCancel, currentUser }) {
             />
           </FormField>
           <FormField label="የትዕዛዝ ቀን *">
-            <input type="date" name="orderDate" value={form.orderDate} onChange={onChange} required
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
+            <EthiopianDateInput
+              value={form.orderDate}
+              onChange={(val) => setForm({ ...form, orderDate: val })}
+              required
             />
           </FormField>
           <FormField label="ቀጠሮ ቀን *">
-            <input type="date" name="appointmentDate" value={form.appointmentDate} onChange={onChange} required
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
+            <EthiopianDateInput
+              value={form.appointmentDate}
+              onChange={(val) => setForm({ ...form, appointmentDate: val })}
+              required
             />
           </FormField>
 
@@ -782,115 +1055,136 @@ function OrderView({ order, onAdvanceStatus, onAddPayment, canManage }) {
   const [busy, setBusy] = useState(false);
   const remaining = Number(order.remainingPayment) || 0;
 
-  const handleAdd = async () => {
+  const handleAdd = async (e) => {
+    e.preventDefault();
     const amt = Number(amount);
-    if (!amt || amt <= 0) { toast.error('መጠን ያስገቡ'); return; }
-    if (amt > remaining) { toast.error('ከቀሪ መብለጥ አይችልም'); return; }
+    if (!amt || amt <= 0 || amt > remaining) {
+      toast.error('ትክክለኛ መጠን ያስገቡ');
+      return;
+    }
     setBusy(true);
-    try { await onAddPayment(amt); setAmount(''); }
-    finally { setBusy(false); }
+    try {
+      await onAddPayment(amt);
+      setAmount('');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
-    <div>
-      <div className="flex items-center gap-3 pb-4 border-b border-gray-100">
-        <div className="w-14 h-14 rounded-xl bg-brand/10 flex items-center justify-center">
-          <FileText size={28} className="text-brand" />
-        </div>
+    <div className="space-y-4 text-sm">
+      <div className="flex items-center justify-between pb-3 border-b border-gray-100">
         <div>
+          <p className="font-mono text-xs text-brand font-semibold">{order.orderNumber}</p>
           <p className="font-bold text-gray-800 text-lg">{order.customerName}</p>
-          <p className="text-sm text-gray-500 font-mono">{order.orderNumber}</p>
+        </div>
+        <Badge color={status.color}>{status.label}</Badge>
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex justify-between gap-3">
+          <span className="text-gray-500 flex items-center gap-1"><Phone size={12} /> ስልክ:</span>
+          <span className="text-gray-800">{order.customerPhone || '-'}</span>
+        </div>
+        <div className="flex justify-between gap-3">
+          <span className="text-gray-500 flex items-center gap-1"><MapPin size={12} /> አድራሻ:</span>
+          <span className="text-gray-800 text-right">{order.address || '-'}</span>
+        </div>
+        <div className="flex justify-between gap-3">
+          <span className="text-gray-500 flex items-center gap-1"><Package size={12} /> የዕቃ ዓይነት:</span>
+          <span className="text-gray-800 font-medium">{order.itemType || '-'}</span>
+        </div>
+        <div className="flex justify-between gap-3">
+          <span className="text-gray-500">ብዛት:</span>
+          <span className="text-gray-800 font-semibold">{order.quantity}</span>
+        </div>
+        <div className="flex justify-between gap-3">
+          <span className="text-gray-500 flex items-center gap-1"><Calendar size={12} /> የትዕዛዝ ቀን:</span>
+          <span className="text-gray-800">{formatEthiopianDate(order.orderDate)}</span>
+        </div>
+        <div className="flex justify-between gap-3">
+          <span className="text-gray-500 flex items-center gap-1"><Calendar size={12} /> ቀጠሮ ቀን:</span>
+          <span className="text-gray-800">{formatEthiopianDate(order.appointmentDate)}</span>
+        </div>
+        {order.branch?.name && (
+          <div className="flex justify-between gap-3">
+            <span className="text-gray-500 flex items-center gap-1"><Building2 size={12} /> ቅርንጫፍ:</span>
+            <span className="text-gray-800">{order.branch.name}</span>
+          </div>
+        )}
+      </div>
+
+      {order.measurements && (order.measurements.width || order.measurements.height || order.measurements.depth) && (
+        <div className="p-3 rounded-lg bg-gray-50">
+          <p className="text-xs font-semibold text-gray-600 mb-1">ልኬት</p>
+          <p className="text-xs text-gray-700">
+            {[
+              order.measurements.width ? `ስፋት: ${order.measurements.width}` : null,
+              order.measurements.height ? `ቁመት: ${order.measurements.height}` : null,
+              order.measurements.depth ? `ጥልቀት: ${order.measurements.depth}` : null,
+            ].filter(Boolean).join(' · ')} {order.measurements.unit || 'cm'}
+          </p>
+        </div>
+      )}
+
+      <div className="p-3 rounded-lg bg-blue-50 space-y-1.5">
+        <div className="flex justify-between">
+          <span className="text-gray-600">ጠቅላላ ዋጋ:</span>
+          <span className="font-semibold text-gray-800">{formatETB(order.totalPrice || 0)}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-gray-600">ቅድመ ክፍያ:</span>
+          <span className="font-semibold text-green-600">{formatETB(order.prepayment || 0)}</span>
+        </div>
+        <div className="flex justify-between pt-1 border-t border-blue-200">
+          <span className="text-gray-700 font-medium">ቀሪ ክፍያ:</span>
+          <span className="font-bold text-orange-600">{formatETB(remaining)}</span>
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-2 py-4">
-        <StatBox label="ጠቅላላ" value={formatETB(order.totalPrice || 0)} icon={DollarSign} color="text-blue-600 bg-blue-50" />
-        <StatBox label="ቅድመ" value={formatETB(order.prepayment || 0)} icon={CheckCircle2} color="text-green-600 bg-green-50" />
-        <StatBox label="ቀሪ" value={formatETB(remaining)} icon={Clock} color="text-red-600 bg-red-50" />
-      </div>
+      {order.note && (
+        <div className="p-3 rounded-lg bg-gray-50">
+          <p className="text-xs font-semibold text-gray-600 mb-1">ማስታወሻ</p>
+          <p className="text-xs text-gray-700">{order.note}</p>
+        </div>
+      )}
 
       {canManage && remaining > 0 && (
-        <div className="p-3 rounded-lg bg-orange-50 border border-orange-200">
-          <p className="text-xs font-semibold text-orange-800 mb-2 flex items-center gap-1">
-            <Wallet size={12} /> ክፍያ መዝግብ
-          </p>
-          <div className="flex items-center gap-2">
+        <form onSubmit={handleAdd} className="flex items-center gap-2 pt-2 border-t border-gray-100">
+          <div className="relative flex-1">
+            <Wallet size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               type="number"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
-              placeholder={`ቀሪ ${formatETB(remaining)}`}
-              min={0}
+              placeholder={`ተጨማሪ ክፍያ (ከፍተኛ ${remaining})`}
+              min={1}
               max={remaining}
               step="0.01"
-              className="flex-1 px-3 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-brand bg-white"
+              className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand"
             />
-            <button
-              type="button"
-              onClick={handleAdd}
-              disabled={busy}
-              className="px-3 py-1.5 rounded-lg bg-brand text-white text-sm font-medium hover:bg-brand-dark disabled:opacity-50"
-            >
-              {busy ? '...' : 'መዝግብ'}
-            </button>
           </div>
-        </div>
+          <button
+            type="submit"
+            disabled={busy}
+            className="px-3 py-2 rounded-lg bg-green-600 text-white text-xs font-semibold hover:bg-green-700 transition disabled:opacity-50"
+          >
+            ክፍያ መዝግብ
+          </button>
+        </form>
       )}
 
-      <div className="space-y-3 pt-3 border-t border-gray-100 text-sm mt-3">
-        <Row label="ዕቃ" value={order.itemType + ' × ' + order.quantity} icon={Package} />
-        <Row label="ስልክ" value={order.customerPhone} icon={Phone} />
-        <Row label="አድራሻ" value={order.address} icon={MapPin} />
-        <Row label="ቅርንጫፍ" value={order.branch?.name || '-'} icon={Building2} />
-        <Row label="የትዕዛዝ ቀን" value={formatDate(order.orderDate || order.createdAt)} icon={Calendar} />
-        <Row label="ቀጠሮ" value={formatDate(order.appointmentDate)} icon={Calendar} />
-        {order.measurements?.width && (
-          <Row label="ልኬት" value={order.measurements.width + ' × ' + order.measurements.height + ' ' + order.measurements.unit} />
-        )}
-        {order.note && <Row label="ማስታወሻ" value={order.note} />}
-        <div className="flex justify-between items-center">
-          <span className="text-gray-500">ሁኔታ:</span>
-          <Badge color={status.color}>{status.label}</Badge>
-        </div>
-        <Row label="የተፈጠረ" value={formatDate(order.createdAt)} />
-      </div>
-
       {canManage && next && (
-        <div className="mt-4 pt-4 border-t border-gray-100">
+        <div className="pt-2">
           <button
             type="button"
             onClick={onAdvanceStatus}
-            className="w-full px-4 py-2.5 rounded-lg bg-brand text-white font-semibold hover:bg-brand-dark transition inline-flex items-center justify-center gap-2"
+            className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-brand text-white text-xs font-semibold hover:bg-brand-dark transition"
           >
-            <Truck size={16} />
-            ወደ "{nextLabel}" አሻግር
+            <Truck size={14} /> ወደ "{nextLabel}" አሸጋግር
           </button>
         </div>
       )}
-    </div>
-  );
-}
-
-function StatBox({ label, value, icon: Icon, color }) {
-  const parts = color.split(' ');
-  return (
-    <div className={'rounded-lg p-2.5 text-center ' + parts[1]}>
-      <div className="flex items-center justify-center mb-1">
-        <Icon size={16} className={parts[0]} />
-      </div>
-      <p className="text-xs font-bold text-gray-800">{value}</p>
-      <p className="text-[10px] text-gray-500">{label}</p>
-    </div>
-  );
-}
-
-function Row({ label, value, icon: Icon }) {
-  return (
-    <div className="flex justify-between gap-3">
-      <span className="text-gray-500 flex-shrink-0 flex items-center gap-1">
-        {Icon && <Icon size={12} />} {label}:
-      </span>
-      <span className="text-right text-gray-800">{value}</span>
     </div>
   );
 }

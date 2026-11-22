@@ -17,6 +17,26 @@ import ConfirmModal from '@/components/ui/ConfirmModal';
 import ActionButtons from '@/components/ui/ActionButtons';
 import toast from 'react-hot-toast';
 
+const ETHIOPIAN_TIME_ZONE = 'Africa/Addis_Ababa';
+
+const ETHIOPIAN_MONTHS = [
+  { value: 1,  label: 'መስከረም' },
+  { value: 2,  label: 'ጥቅምት' },
+  { value: 3,  label: 'ኅዳር' },
+  { value: 4,  label: 'ታኅሣሥ' },
+  { value: 5,  label: 'ጥር' },
+  { value: 6,  label: 'የካቲት' },
+  { value: 7,  label: 'መጋቢት' },
+  { value: 8,  label: 'ሚያዝያ' },
+  { value: 9,  label: 'ግንቦት' },
+  { value: 10, label: 'ሰኔ' },
+  { value: 11, label: 'ሐምሌ' },
+  { value: 12, label: 'ነሐሴ' },
+  { value: 13, label: 'ጳጉሜን' },
+];
+
+const ETHIOPIAN_WEEKDAYS_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
 const WARRANTY_STATUS = {
   active:   { label: 'በስራ ላይ',   color: 'green'  },
   expiring: { label: 'የሚያልቅ',   color: 'yellow' },
@@ -47,16 +67,227 @@ const esc = (v) =>
 // Format Date to Ethiopian Calendar
 const formatEthiopianDate = (date) => {
   if (!date) return '—';
+  const d = date instanceof Date ? date : new Date(date);
+  if (isNaN(d.getTime())) return '—';
   try {
     return new Intl.DateTimeFormat('am-ET-u-ca-ethiopic', {
+      timeZone: ETHIOPIAN_TIME_ZONE,
       year: 'numeric',
       month: 'long',
       day: 'numeric',
-    }).format(new Date(date));
+    }).format(d);
   } catch (e) {
-    return new Date(date).toLocaleDateString('am-ET');
+    return d.toLocaleDateString('am-ET', { timeZone: ETHIOPIAN_TIME_ZONE });
   }
 };
+
+function toUtcNoonDate(isoStr) {
+  if (!isoStr) return new Date(NaN);
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(isoStr).trim());
+  if (match) {
+    return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12, 0, 0));
+  }
+  const d = new Date(isoStr);
+  if (isNaN(d.getTime())) return new Date(NaN);
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 12, 0, 0));
+}
+
+function toIsoDateFromUtc(date) {
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(date.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function getEthDateParts(isoStr) {
+  const date = toUtcNoonDate(isoStr);
+  if (isNaN(date.getTime())) return null;
+
+  const weekdayStr = new Intl.DateTimeFormat('en-US', {
+    timeZone: ETHIOPIAN_TIME_ZONE,
+    weekday: 'short',
+  }).format(date);
+  const dow = ETHIOPIAN_WEEKDAYS_EN.indexOf(weekdayStr);
+
+  try {
+    const parts = new Intl.DateTimeFormat('en-u-ca-ethiopic', {
+      timeZone: ETHIOPIAN_TIME_ZONE,
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+    }).formatToParts(date);
+
+    const year = Number(parts.find((p) => p.type === 'year')?.value);
+    const month = Number(parts.find((p) => p.type === 'month')?.value);
+    const day = Number(parts.find((p) => p.type === 'day')?.value);
+    if (year && month && day) {
+      return { year, month, day, dow: dow >= 0 ? dow : 0 };
+    }
+  } catch (e) {
+    // Fallback handled below
+  }
+  return null;
+}
+
+function ethToGregorianIso(ethYear, ethMonth, ethDay) {
+  const isLeap = (ethYear + 1) % 4 === 0;
+  const maxDay = ethMonth === 13 ? (isLeap ? 6 : 5) : 30;
+  const clampedDay = Math.min(Math.max(1, ethDay), maxDay);
+
+  let gYear = ethYear + 7;
+  let gMonth = ethMonth + 8;
+  if (gMonth > 12) {
+    gMonth -= 12;
+    gYear += 1;
+  }
+
+  const candidate = new Date(Date.UTC(gYear, gMonth - 1, Math.min(clampedDay + 10, 28), 12, 0, 0));
+  for (let i = -15; i <= 15; i++) {
+    const test = new Date(candidate.getTime() + i * 86400000);
+    const p = getEthDateParts(toIsoDateFromUtc(test));
+    if (p && p.year === ethYear && p.month === ethMonth && p.day === clampedDay) {
+      return toIsoDateFromUtc(test);
+    }
+  }
+  return toIsoDateFromUtc(candidate);
+}
+
+function getEthMonthDays(ethYear, ethMonth) {
+  const isLeap = (ethYear + 1) % 4 === 0;
+  const totalDays = ethMonth === 13 ? (isLeap ? 6 : 5) : 30;
+  const days = [];
+  for (let d = 1; d <= totalDays; d++) {
+    const iso = ethToGregorianIso(ethYear, ethMonth, d);
+    const parts = getEthDateParts(iso);
+    days.push({ day: d, iso, dow: parts ? parts.dow : 0 });
+  }
+  return days;
+}
+
+function EthiopianDateInput({ value, onChange, required = false }) {
+  const initialParts = useMemo(() => {
+    const p = getEthDateParts(value);
+    return p || { year: 2019, month: 3, day: 13, dow: 0 };
+  }, [value]);
+
+  const [open, setOpen] = useState(false);
+  const [viewYear, setViewYear] = useState(initialParts.year);
+  const [viewMonth, setViewMonth] = useState(initialParts.month);
+
+  useEffect(() => {
+    const p = getEthDateParts(value);
+    if (p) {
+      setViewYear(p.year);
+      setViewMonth(p.month);
+    }
+  }, [value]);
+
+  const monthDays = useMemo(() => getEthMonthDays(viewYear, viewMonth), [viewYear, viewMonth]);
+  const leadingBlanks = monthDays.length > 0 ? monthDays[0].dow : 0;
+
+  const selectDate = (iso) => {
+    onChange(iso);
+    setOpen(false);
+  };
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white hover:border-gray-300 focus:border-brand focus:outline-none text-sm text-gray-800 flex items-center justify-between gap-2 text-left transition"
+      >
+        <span className={value ? 'text-gray-800 font-medium' : 'text-gray-400'}>
+          {value ? formatEthiopianDate(`${value}T12:00:00`) : 'የኢትዮጵያ ቀን ይምረጡ'}
+        </span>
+        <Calendar size={15} className="text-gray-400 flex-shrink-0" />
+      </button>
+      {required && (
+        <input
+          type="text"
+          tabIndex={-1}
+          aria-hidden="true"
+          value={value || ''}
+          onChange={() => {}}
+          required
+          className="sr-only"
+        />
+      )}
+
+      {open && (
+        <div className="absolute z-30 mt-1.5 w-72 bg-white border border-gray-200 rounded-xl shadow-lg p-3">
+          <div className="flex items-center justify-between gap-2 mb-2.5">
+            <select
+              value={viewMonth}
+              onChange={(e) => setViewMonth(Number(e.target.value))}
+              className="px-2 py-1 border border-gray-300 rounded-lg text-xs font-medium text-gray-800 bg-white focus:outline-none focus:ring-1 focus:ring-brand"
+            >
+              {ETHIOPIAN_MONTHS.map((m) => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
+            <input
+              type="number"
+              value={viewYear}
+              onChange={(e) => setViewYear(Number(e.target.value) || 2019)}
+              className="w-20 px-2 py-1 border border-gray-300 rounded-lg text-xs font-medium text-gray-800 bg-white focus:outline-none focus:ring-1 focus:ring-brand"
+            />
+          </div>
+
+          <div className="grid grid-cols-7 text-center text-[10px] font-semibold text-gray-400 mb-1">
+            <span>እሑድ</span>
+            <span>ሰኞ</span>
+            <span>ማክሰ</span>
+            <span>ረቡዕ</span>
+            <span>ሐሙስ</span>
+            <span>ዓርብ</span>
+            <span>ቅዳሜ</span>
+          </div>
+
+          <div className="grid grid-cols-7 gap-1 text-center text-xs">
+            {Array.from({ length: leadingBlanks }).map((_, idx) => (
+              <span key={`b-${idx}`} />
+            ))}
+            {monthDays.map((d) => {
+              const isSelected = value === d.iso;
+              return (
+                <button
+                  key={d.day}
+                  type="button"
+                  onClick={() => selectDate(d.iso)}
+                  className={`h-7 w-full rounded-lg text-xs font-medium transition ${
+                    isSelected
+                      ? 'bg-brand text-white font-bold'
+                      : 'text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  {d.day}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-gray-100 text-xs">
+            <button
+              type="button"
+              onClick={() => selectDate(toIsoDateFromUtc(new Date()))}
+              className="text-brand font-medium hover:underline"
+            >
+              ዛሬ
+            </button>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="text-gray-500 hover:text-gray-700"
+            >
+              ዝጋ
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function WarrantyPage() {
   const { user } = useAuth();
@@ -172,7 +403,6 @@ export default function WarrantyPage() {
         else if (daysLeft <= 30) computedStatus = 'expiring';
       }
 
-      // Branch record (works whether branch is an id or already populated)
       const bId = order?.branch?._id ?? order?.branch ?? w.branch?._id ?? w.branch;
       const branchRecord =
         branchMap.get(String(bId)) ||
@@ -226,7 +456,6 @@ export default function WarrantyPage() {
     return { total, active, expiring, expired };
   }, [filtered]);
 
-  // ---- PDF Export (Report) ----
   function exportPdf() {
     if (filtered.length === 0) {
       toast.error('ምንም ዋስትና የለም');
@@ -293,9 +522,7 @@ export default function WarrantyPage() {
     toast.success('PDF ተዘጋጅቷል — ለማውረድ Ctrl+P ይጫኑ');
   }
 
-  // ---- Single Certificate PDF ----
   function downloadSinglePdf(w) {
-    // ALL registered branches' addresses
     const branchLines = branches
       .map((b) => ({ name: b.name, addr: b.address || b.location }))
       .filter((b) => b.addr);
@@ -304,7 +531,6 @@ export default function WarrantyPage() {
       ? branchLines.map((b) => `<div><b>${esc(b.name)}፡</b> ${esc(b.addr)}</div>`).join('')
       : FALLBACK_ADDRESS.map((l) => `<div>${esc(l)}</div>`).join('');
 
-    // Phones: owner -> from database, everyone else -> hard-coded company phones
     let phones = COMPANY_PHONES;
     if (isOwner) {
       const dbPhones = [
@@ -510,7 +736,6 @@ export default function WarrantyPage() {
   </div>
 
   <script>
-    // If /logo.png is missing, show a simple GURUM badge instead
     var logo = document.getElementById('gurum-logo');
     logo.addEventListener('error', function () {
       var d = document.createElement('div');
@@ -831,182 +1056,130 @@ function StatCard({ label, value, icon: Icon, color }) {
 }
 
 function WarrantyForm({ item, orders, products, branches, userBranchId, isSeller, onSave, onCancel }) {
-  const today = new Date().toISOString().slice(0, 10);
+  const defaultBranch = isSeller && userBranchId
+    ? userBranchId
+    : (item?.branch?._id || item?.branch || item?.order?.branch?._id || item?.order?.branch || '');
 
   const [form, setForm] = useState({
-    order: item?._order?._id || item?.order || '',
-    product: item?._product?._id || item?.product || '',
-    itemType: item?.itemType || '',
-    price: item?.price ?? item?._price ?? '',
-    customerName: item?._customerName || '',
-    customerPhone: item?._customerPhone || '',
-    startDate: item?._startDate ? new Date(item._startDate).toISOString().slice(0, 10) : today,
-    durationMonths: item?._durationMonths || DEFAULT_WARRANTY_MONTHS,
-    status: item?._status || 'active',
-    branch: item?._order?.branch?._id || item?._order?.branch || item?.branch?._id || item?.branch || userBranchId || '',
-    notes: item?.notes || '',
+    warrantyNumber: item?.warrantyNumber || '',
+    customerName: item?.customerName || item?.order?.customerName || '',
+    customerPhone: item?.customerPhone || item?.order?.customerPhone || '',
+    itemType: item?.itemType || item?.product?.name || item?.order?.itemType || '',
+    startDate: item?.startDate
+      ? new Date(item.startDate).toISOString().split('T')[0]
+      : new Date().toISOString().split('T')[0],
+    endDate: item?.endDate
+      ? new Date(item.endDate).toISOString().split('T')[0]
+      : '',
+    durationMonths: item?.durationMonths || DEFAULT_WARRANTY_MONTHS,
+    price: item?.price ?? item?.purchasePrice ?? item?.order?.totalPrice ?? '',
+    status: item?.status || 'active',
+    branch: defaultBranch,
+    order: item?.order?._id || item?.order || '',
+    product: item?.product?._id || item?.product || '',
   });
 
   const onChange = (e) => {
     const { name, value } = e.target;
-    if (name === 'durationMonths') {
-      setForm((f) => ({ ...f, [name]: value === '' ? '' : Number(value) }));
-    } else if (name === 'order') {
-      const o = orders.find((x) => String(x._id) === String(value));
-      setForm((f) => ({
-        ...f,
-        order: value,
-        itemType: o?.itemType || f.itemType,
-        customerName: o?.customerName || f.customerName,
-        customerPhone: o?.customerPhone || f.customerPhone,
-        branch: o?.branch?._id || o?.branch || f.branch,
-        price: o?.totalPrice ?? o?.total ?? f.price,
-      }));
-    } else {
-      setForm((f) => ({ ...f, [name]: value }));
-    }
+    setForm((prev) => ({
+      ...prev,
+      [name]: ['durationMonths'].includes(name) ? Number(value) : value,
+    }));
   };
-
-  const endDate = useMemo(() => {
-    if (!form.startDate || !form.durationMonths) return null;
-    const d = new Date(form.startDate);
-    d.setMonth(d.getMonth() + Number(form.durationMonths));
-    return d;
-  }, [form.startDate, form.durationMonths]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!form.customerName.trim()) { toast.error('የደንበኛ ስም ያስፈልጋል'); return; }
-    if (!form.customerPhone.trim()) { toast.error('የደንበኛ ስልክ ያስፈልጋል'); return; }
-    if (!form.itemType.trim()) { toast.error('የዕቃ ዓይነት ያስፈልጋል'); return; }
-    if (!form.durationMonths || form.durationMonths < 1) { toast.error('የዋስትና ጊዜ ቢያንስ 1 ወር መሆን አለበት'); return; }
-
     onSave({
-      order: form.order || null,
-      product: form.product || null,
-      itemType: form.itemType.trim(),
-      price: form.price === '' ? null : Number(form.price),
-      customerName: form.customerName.trim(),
-      customerPhone: form.customerPhone.trim(),
-      startDate: form.startDate,
-      endDate: endDate ? endDate.toISOString().slice(0, 10) : null,
-      durationMonths: Number(form.durationMonths),
+      warrantyNumber: form.warrantyNumber || undefined,
+      customerName: form.customerName || undefined,
+      customerPhone: form.customerPhone || undefined,
+      itemType: form.itemType || undefined,
+      startDate: form.startDate || undefined,
+      endDate: form.endDate || undefined,
+      durationMonths: Number(form.durationMonths) || DEFAULT_WARRANTY_MONTHS,
+      price: form.price !== '' ? Number(form.price) : undefined,
       status: form.status,
-      branch: form.branch || null,
-      notes: form.notes.trim(),
+      branch: form.branch || undefined,
+      order: form.order || undefined,
+      product: form.product || undefined,
     });
   };
 
+  const inputClass =
+    'w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-800 bg-white focus:border-brand focus:outline-none';
+
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div>
-        <h4 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-          <FileText size={14} /> የትዕዛዝ ማገናኛ (አማራጭ)
-        </h4>
-        <FormField label="ትዕዛዝ ይምረጡ">
-          <select name="order" value={form.order} onChange={onChange}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-800">
-            <option value="">— ያልተገናኘ —</option>
-            {orders.map((o) => (
-              <option key={o._id} value={o._id}>
-                {o.orderNumber || `#${String(o._id).slice(-8)}`} — {o.customerName} — {o.itemType}
-              </option>
-            ))}
-          </select>
-        </FormField>
-      </div>
-
-      <div>
-        <h4 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-          <Package size={14} /> የዕቃ መረጃ
-        </h4>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <FormField label="ምርት ይምረጡ (አማራጭ)">
-            <select name="product" value={form.product} onChange={onChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-800">
-              <option value="">— ያልተገናኘ —</option>
-              {products.map((p) => <option key={p._id} value={p._id}>{p.name}</option>)}
-            </select>
-          </FormField>
-          <FormField label="የዕቃ ዓይነት *">
-            <input name="itemType" value={form.itemType} onChange={onChange} required
-              placeholder="ለምሳሌ: ኤሌክትሪክ ምጣድ"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-800 bg-white" />
-          </FormField>
-          <FormField label="የተገዛበት ዋጋ (ብር)">
-            <input type="number" name="price" min={0} value={form.price} onChange={onChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-800 bg-white" />
-          </FormField>
-        </div>
-      </div>
-
-      <div>
-        <h4 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-          <User size={14} /> የደንበኛ መረጃ
-        </h4>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <FormField label="ስም *">
-            <input name="customerName" value={form.customerName} onChange={onChange} required
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-800 bg-white" />
-          </FormField>
-          <FormField label="ስልክ *">
-            <input name="customerPhone" value={form.customerPhone} onChange={onChange} required
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-800 bg-white" />
-          </FormField>
-        </div>
-      </div>
-
-      <div>
-        <h4 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-          <Calendar size={14} /> የዋስትና ጊዜ
-        </h4>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <FormField label="የጀመረበት ቀን *">
-            <input type="date" name="startDate" value={form.startDate} onChange={onChange} required
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-800 bg-white" />
-          </FormField>
-          <FormField label="የዋስትና ጊዜ (ወራት) *">
-            <input type="number" name="durationMonths" value={form.durationMonths} onChange={onChange} required min={1}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-800 bg-white" />
-          </FormField>
-          <FormField label="የሚያልቅበት ቀን (በራስ-ሰር)">
-            <input type="text" value={endDate ? formatEthiopianDate(endDate) : '—'} readOnly
-              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50 text-gray-600 cursor-not-allowed" />
-          </FormField>
-        </div>
-      </div>
-
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <FormField label="ሁኔታ">
-          <select name="status" value={form.status} onChange={onChange}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-800">
+        <div>
+          <label className="text-xs font-medium text-gray-600 mb-1 block">የዋስትና ቁጥር</label>
+          <input name="warrantyNumber" value={form.warrantyNumber} onChange={onChange} className={inputClass} />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-gray-600 mb-1 block">የዕቃው አይነት *</label>
+          <input name="itemType" value={form.itemType} onChange={onChange} required className={inputClass} />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-gray-600 mb-1 block">የገዢው ስም</label>
+          <input name="customerName" value={form.customerName} onChange={onChange} className={inputClass} />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-gray-600 mb-1 block">ስልክ</label>
+          <input name="customerPhone" value={form.customerPhone} onChange={onChange} className={inputClass} />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-gray-600 mb-1 block">የተገዛበት ቀን *</label>
+          <EthiopianDateInput
+            value={form.startDate}
+            onChange={(val) => setForm((prev) => ({ ...prev, startDate: val }))}
+            required
+          />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-gray-600 mb-1 block">የሚያልቅበት ቀን</label>
+          <EthiopianDateInput
+            value={form.endDate}
+            onChange={(val) => setForm((prev) => ({ ...prev, endDate: val }))}
+          />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-gray-600 mb-1 block">የዋስትና ጊዜ (ወራት)</label>
+          <input type="number" name="durationMonths" value={form.durationMonths} onChange={onChange} min={1} className={inputClass} />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-gray-600 mb-1 block">የተገዛበት ዋጋ</label>
+          <input type="number" name="price" value={form.price} onChange={onChange} min={0} className={inputClass} />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-gray-600 mb-1 block">ሁኔታ</label>
+          <select name="status" value={form.status} onChange={onChange} className={inputClass}>
             {Object.entries(WARRANTY_STATUS).map(([k, v]) => (
               <option key={k} value={k}>{v.label}</option>
             ))}
           </select>
-        </FormField>
-        <FormField label="ቅርንጫፍ">
-          <select name="branch" value={form.branch} onChange={onChange}
-            disabled={isSeller && !!userBranchId}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-800 disabled:opacity-60">
-            <option value="">— ይምረጡ —</option>
-            {branches.map((b) => <option key={b._id} value={b._id}>{b.name}</option>)}
-          </select>
-        </FormField>
+        </div>
+        <div>
+          <label className="text-xs font-medium text-gray-600 mb-1 block">ቅርንጫፍ</label>
+          {isSeller ? (
+            <div className="w-full px-3 py-2 rounded-lg bg-blue-50 text-blue-700 text-sm font-medium">
+              {branches.find((b) => String(b._id) === String(userBranchId))?.name || 'ቅርንጫፍ'}
+            </div>
+          ) : (
+            <select name="branch" value={form.branch} onChange={onChange} className={inputClass}>
+              <option value="">— ይምረጡ —</option>
+              {branches.map((b) => <option key={b._id} value={b._id}>{b.name}</option>)}
+            </select>
+          )}
+        </div>
       </div>
 
-      <FormField label="ማስታወሻ">
-        <textarea name="notes" value={form.notes} onChange={onChange} rows={2}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-800 bg-white resize-none" />
-      </FormField>
-
-      <div className="flex gap-2 pt-2 border-t border-gray-200">
+      <div className="flex gap-2 pt-3 border-t border-gray-100">
         <button type="button" onClick={onCancel}
-          className="flex-1 px-4 py-2.5 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 transition">
+          className="flex-1 px-4 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 transition">
           ሰርዝ
         </button>
         <button type="submit"
-          className="flex-1 px-4 py-2.5 rounded-lg bg-brand text-white font-semibold hover:bg-brand-dark transition">
+          className="flex-1 px-4 py-2 rounded-lg bg-brand text-white font-semibold hover:bg-brand-dark transition">
           {item ? 'አስተካክል' : 'መዝግብ'}
         </button>
       </div>
@@ -1014,81 +1187,37 @@ function WarrantyForm({ item, orders, products, branches, userBranchId, isSeller
   );
 }
 
-function FormField({ label, children, full }) {
-  return (
-    <div className={full ? 'md:col-span-2' : ''}>
-      <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
-      {children}
-    </div>
-  );
-}
-
 function WarrantyView({ item, onDownload }) {
   return (
-    <div>
-      <div className="flex items-center gap-3 pb-4 border-b border-gray-100">
-        <div className="w-14 h-14 rounded-lg bg-brand text-white flex items-center justify-center">
-          <ShieldCheck size={26} />
-        </div>
+    <div className="space-y-4 text-sm">
+      <div className="flex items-center justify-between border-b border-gray-100 pb-3">
         <div>
-          <p className="font-bold text-gray-800 text-lg">{item._productName}</p>
-          <p className="text-sm text-gray-500 font-mono">{item._code}</p>
+          <p className="text-xs text-gray-500">የዋስትና ኮድ</p>
+          <p className="font-mono font-bold text-brand">{item._code}</p>
         </div>
-        <div className="ml-auto">
-          <Badge color={item._statusColor}>{item._statusLabel}</Badge>
-        </div>
+        <Badge color={item._statusColor}>{item._statusLabel}</Badge>
       </div>
-      <div className="space-y-3 pt-4 text-sm">
-        <Section title="የዋስትና ዝርዝር">
-          <Row label="የጀመረበት" value={formatEthiopianDate(item._startDate)} />
-          <Row label="የሚያልቅበት" value={formatEthiopianDate(item._endDate)} />
-          <Row label="ጊዜ" value={`${item._durationMonths} ወራት`} />
-          <Row label="የተገዛበት ዋጋ" value={item._price != null ? formatETB(item._price) : '—'} />
-          <Row label="የቀረ ቀን"
-            value={item._daysLeft === null ? '—' : item._daysLeft < 0 ? `${Math.abs(item._daysLeft)} ቀን አልፏል` : `${item._daysLeft} ቀን`}
-            bold
-            color={item._daysLeft === null ? 'text-gray-800' : item._daysLeft < 0 ? 'text-red-600' : item._daysLeft <= 30 ? 'text-yellow-600' : 'text-green-600'}
-          />
-        </Section>
-        <Section title="ደንበኛ">
-          <Row label="ስም" value={item._customerName} />
-          <Row label="ስልክ" value={item._customerPhone} />
-        </Section>
-        <Section title="ቦታ">
-          <Row label="ቅርንጫፍ" value={item._branch} />
-          <Row label="አድራሻ" value={item._branchAddress || '—'} />
-        </Section>
-        {item.notes && (
-          <Section title="ማስታወሻ">
-            <p className="text-sm text-gray-700 bg-gray-50 rounded-lg p-2">{item.notes}</p>
-          </Section>
+
+      <div className="space-y-2">
+        <div className="flex justify-between"><span className="text-gray-500">ምርት:</span><span className="font-medium text-gray-800">{item._productName}</span></div>
+        <div className="flex justify-between"><span className="text-gray-500">ደንበኛ:</span><span className="font-medium text-gray-800">{item._customerName}</span></div>
+        <div className="flex justify-between"><span className="text-gray-500">ስልክ:</span><span className="font-medium text-gray-800">{item._customerPhone}</span></div>
+        <div className="flex justify-between"><span className="text-gray-500">ቅርንጫፍ:</span><span className="font-medium text-gray-800">{item._branch}</span></div>
+        <div className="flex justify-between"><span className="text-gray-500">የተገዛበት ቀን:</span><span className="font-medium text-gray-800">{formatEthiopianDate(item._startDate)}</span></div>
+        <div className="flex justify-between"><span className="text-gray-500">የሚያልቅበት ቀን:</span><span className="font-medium text-gray-800">{formatEthiopianDate(item._endDate)}</span></div>
+        <div className="flex justify-between"><span className="text-gray-500">የዋስትና ጊዜ:</span><span className="font-medium text-gray-800">{item._durationMonths} ወራት</span></div>
+        {item._price != null && (
+          <div className="flex justify-between"><span className="text-gray-500">የተገዛበት ዋጋ:</span><span className="font-medium text-gray-800">{formatETB(item._price)}</span></div>
         )}
       </div>
 
-      <div className="mt-6 pt-4 border-t border-gray-100 flex gap-2">
-        <button type="button" onClick={onDownload}
-          className="flex-1 px-4 py-2.5 rounded-lg bg-brand text-white font-semibold hover:bg-brand-dark transition flex justify-center items-center gap-2">
-          <FileDown size={18} /> ሰርተፊኬት አውርድ
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function Section({ title, children }) {
-  return (
-    <div>
-      <p className="text-xs font-semibold text-gray-500 uppercase mb-1.5">{title}</p>
-      <div className="space-y-1.5">{children}</div>
-    </div>
-  );
-}
-
-function Row({ label, value, bold, color }) {
-  return (
-    <div className="flex justify-between gap-3">
-      <span className="text-gray-500 flex-shrink-0">{label}:</span>
-      <span className={`text-right ${bold ? 'font-semibold' : ''} ${color || 'text-gray-800'}`}>{value}</span>
+      <button
+        type="button"
+        onClick={onDownload}
+        className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-brand text-white font-semibold hover:bg-brand-dark transition"
+      >
+        <FileDown size={16} /> የዋስትና ሰርተፊኬት አውርድ
+      </button>
     </div>
   );
 }

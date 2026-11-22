@@ -9,7 +9,6 @@ import {
   Crown, Phone, Mail, Building2, MapPin, Calendar, User,
 } from 'lucide-react';
 import Card from '@/components/ui/Card';
-import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
 import Modal from '@/components/ui/Modal';
 import ConfirmModal from '@/components/ui/ConfirmModal';
@@ -19,10 +18,12 @@ import toast from 'react-hot-toast';
 const ETHIOPIAN_TIME_ZONE = 'Africa/Addis_Ababa';
 
 const ROLE_ICONS = {
-  admin:    Shield,
-  owner:    Crown,
-  seller:   Briefcase,
-  customer: User,
+  admin:       Shield,
+  owner:       Crown,
+  seller:      Briefcase,
+  cashier:     Briefcase,
+  storekeeper: Briefcase,
+  customer:    User,
 };
 
 function formatEthiopianDate(input, options = {}) {
@@ -60,16 +61,30 @@ export default function UsersPage() {
   const [editingUser, setEditingUser] = useState(null);
   const [viewUser, setViewUser] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  const canManage = currentUser?.role === 'admin';
+  const canManage = ['admin', 'owner'].includes(currentUser?.role);
 
-  // Load users and branches from API
+  const loadUsers = async () => {
+    try {
+      const data = await apiFetch('/users');
+      setUsers(Array.isArray(data) ? data : []);
+    } catch (err) {
+      toast.error(err?.message || 'ስህተት ተፈጥሯል');
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
+
     apiFetch('/users')
-      .then((data) => { if (!cancelled) setUsers(Array.isArray(data) ? data : []); })
-      .catch((err) => { if (!cancelled) toast.error(err.message); });
+      .then((data) => {
+        if (!cancelled) setUsers(Array.isArray(data) ? data : []);
+      })
+      .catch((err) => {
+        if (!cancelled) toast.error(err?.message || 'ስህተት ተፈጥሯል');
+      });
 
     apiFetch('/branches')
       .then((data) => {
@@ -89,13 +104,12 @@ export default function UsersPage() {
     return () => { cancelled = true; };
   }, []);
 
-  // Filter
   const filtered = useMemo(() => {
     return users.filter((u) => {
       const q = search.toLowerCase();
       const matchSearch =
-        u.fullName.toLowerCase().includes(q) ||
-        u.phone.includes(q) ||
+        (u.fullName || '').toLowerCase().includes(q) ||
+        (u.phone || '').includes(q) ||
         (u.email || '').toLowerCase().includes(q);
       const matchRole = roleFilter === 'all' || u.role === roleFilter;
       const matchStatus =
@@ -106,7 +120,6 @@ export default function UsersPage() {
     });
   }, [users, search, roleFilter, statusFilter]);
 
-  // Stats
   const stats = useMemo(() => {
     const total = users.length;
     const active = users.filter((u) => u.isActive).length;
@@ -115,7 +128,6 @@ export default function UsersPage() {
     return { total, active, admins, customers };
   }, [users]);
 
-  // Delete
   const handleDeleteClick = (user) => {
     if (user._id === currentUser?._id) {
       toast.error('የራስዎን አካውንት መሰረዝ አይችሉም');
@@ -128,55 +140,75 @@ export default function UsersPage() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      await new Promise((r) => setTimeout(r, 500));
-      setUsers(users.filter((u) => u._id !== deleteTarget._id));
+      await apiFetch(`/users/${deleteTarget._id}`, { method: 'DELETE' });
+      setUsers((prev) => prev.filter((u) => u._id !== deleteTarget._id));
       toast.success('ተጠቃሚ ተሰርዟል');
       setDeleteTarget(null);
-    } catch (_) {
-      toast.error('ስህተት ተፈጥሯል');
+    } catch (err) {
+      toast.error(err?.message || 'ስህተት ተፈጥሯል');
     } finally {
       setDeleting(false);
     }
   };
 
-  // Save
-  const handleSave = (data) => {
-    const matchedBranch =
-      data.branch && typeof data.branch === 'string'
-        ? branches.find((b) => String(b._id || b.id) === String(data.branch)) || null
-        : data.branch;
-
-    const normalizedData = {
-      ...data,
-      branch: matchedBranch || null,
-    };
-
-    if (editingUser) {
-      setUsers(users.map((u) => u._id === editingUser._id ? { ...u, ...normalizedData } : u));
-      toast.success('ተጠቃሚ ተስተካክሏል');
-    } else {
-      const newUser = {
-        ...normalizedData,
-        _id: 'u' + (users.length + 1),
-        isActive: true,
-        lastLogin: null,
-        createdAt: new Date().toISOString().split('T')[0],
+  const handleSave = async (data) => {
+    setSaving(true);
+    try {
+      const payload = {
+        ...data,
+        branch: data.branch || null,
       };
-      setUsers([newUser, ...users]);
-      toast.success('ተጠቃሚ ተጨምሯል');
+
+      if (editingUser) {
+        const updated = await apiFetch(`/users/${editingUser._id}`, {
+          method: 'PATCH',
+          body: JSON.stringify(payload),
+        });
+        setUsers((prev) =>
+          prev.map((u) => (u._id === editingUser._id ? { ...u, ...updated } : u))
+        );
+        toast.success('ተጠቃሚ ተስተካክሏል');
+      } else {
+        const created = await apiFetch('/users', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+        setUsers((prev) => [created, ...prev]);
+        toast.success(
+          `ተጠቃሚ ተፈጥሯል!\n📞 ${payload.phone}\n🔑 ${payload.password}`,
+          { duration: 20000 }
+        );
+      }
+
+      setShowModal(false);
+      setEditingUser(null);
+    } catch (err) {
+      toast.error(err?.message || 'ስህተት ተፈጥሯል');
+    } finally {
+      setSaving(false);
     }
-    setShowModal(false);
-    setEditingUser(null);
   };
 
-  // Toggle active
-  const handleToggleActive = (user) => {
+  const handleToggleActive = async (user) => {
+    if (!canManage) return;
     if (user._id === currentUser?._id) {
       toast.error('የራስዎን አካውንት ማሰናከል አይችሉም');
       return;
     }
-    setUsers(users.map((u) => u._id === user._id ? { ...u, isActive: !u.isActive } : u));
-    toast.success(user.isActive ? 'ተጠቃሚ ተሰናክሏል' : 'ተጠቃሚ ነቅቷል');
+
+    const nextActive = !user.isActive;
+    try {
+      const updated = await apiFetch(`/users/${user._id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ isActive: nextActive }),
+      });
+      setUsers((prev) =>
+        prev.map((u) => (u._id === user._id ? { ...u, ...updated, isActive: updated?.isActive ?? nextActive } : u))
+      );
+      toast.success(nextActive ? 'ተጠቃሚ ነቅቷል' : 'ተጠቃሚ ተሰናክሏል');
+    } catch (err) {
+      toast.error(err?.message || 'ስህተት ተፈጥሯል');
+    }
   };
 
   return (
@@ -287,7 +319,7 @@ export default function UsersPage() {
                               ? 'bg-brand text-white'
                               : 'bg-gray-300 text-gray-600'
                           }`}>
-                            {user.fullName.charAt(0)}
+                            {(user.fullName || '?').charAt(0)}
                           </div>
                           <div>
                             <p className="font-medium text-gray-800">{user.fullName}</p>
@@ -355,6 +387,7 @@ export default function UsersPage() {
           branches={branches}
           onSave={handleSave}
           onCancel={() => { setShowModal(false); setEditingUser(null); }}
+          saving={saving}
         />
       </Modal>
 
@@ -403,7 +436,7 @@ function StatCard({ label, value, icon: Icon, color }) {
   );
 }
 
-function UserForm({ user, branches = [], onSave, onCancel }) {
+function UserForm({ user, branches = [], onSave, onCancel, saving = false }) {
   const isEdit = Boolean(user?._id);
 
   const [form, setForm] = useState({
@@ -421,7 +454,6 @@ function UserForm({ user, branches = [], onSave, onCancel }) {
     setForm({ ...form, [e.target.name]: e.target.value });
   };
 
-  // ---- Password generator ----
   function generatePassword() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%';
     let pwd = '';
@@ -459,12 +491,6 @@ function UserForm({ user, branches = [], onSave, onCancel }) {
 
     if (!isEdit) {
       payload.password = password;
-      try {
-        toast.success(
-          `ተጠቃሚ ተፈጥሯል!\n📞 ${payload.phone}\n🔑 ${password}`,
-          { duration: 20000 }
-        );
-      } catch {}
     }
 
     onSave(payload);
@@ -558,13 +584,13 @@ function UserForm({ user, branches = [], onSave, onCancel }) {
       )}
 
       <div className="flex gap-2 pt-2 border-t border-gray-200">
-        <button type="button" onClick={onCancel}
-          className="flex-1 px-4 py-2.5 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 transition">
+        <button type="button" onClick={onCancel} disabled={saving}
+          className="flex-1 px-4 py-2.5 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-50 transition">
           ሰርዝ
         </button>
-        <button type="submit"
-          className="flex-1 px-4 py-2.5 rounded-lg bg-brand text-white font-semibold hover:bg-brand-dark transition">
-          {isEdit ? 'አስተካክል' : 'ጨምር'}
+        <button type="submit" disabled={saving}
+          className="flex-1 px-4 py-2.5 rounded-lg bg-brand text-white font-semibold hover:bg-brand-dark disabled:opacity-50 transition">
+          {saving ? 'በመጫን ላይ...' : (isEdit ? 'አስተካክል' : 'ጨምር')}
         </button>
       </div>
     </form>
@@ -597,7 +623,7 @@ function UserView({ user, branches = [] }) {
         <div className={`w-16 h-16 rounded-full flex items-center justify-center font-bold text-2xl ${
           user.isActive ? 'bg-brand text-white' : 'bg-gray-300 text-gray-600'
         }`}>
-          {user.fullName.charAt(0)}
+          {(user.fullName || '?').charAt(0)}
         </div>
         <div>
           <p className="font-bold text-gray-800 text-lg">{user.fullName}</p>

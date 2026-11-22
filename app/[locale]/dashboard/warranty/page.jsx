@@ -385,7 +385,7 @@ export default function WarrantyPage() {
       });
     }
     return warranties;
-  }, [warranties, isCustomer, isSeller, userBranchId, user, orderMap]);
+  }, [warranties, isCustomer, isSeller, isCashier, userBranchId, user, orderMap]);
 
   const enriched = useMemo(() => {
     return scopedWarranties.map((w) => {
@@ -835,8 +835,11 @@ export default function WarrantyPage() {
           )}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <button onClick={exportPdf} disabled={filtered.length === 0}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-50 text-red-700 hover:bg-red-100 transition disabled:opacity-40">
+          <button
+            onClick={exportPdf}
+            disabled={filtered.length === 0}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-50 text-red-700 hover:bg-red-100 transition disabled:opacity-40"
+          >
             <FileDown size={13} /> PDF
           </button>
           {canManage && (
@@ -851,7 +854,7 @@ export default function WarrantyPage() {
       {!isCustomer && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard label="ጠቅላላ ዋስትናዎች" value={stats.total}    icon={ShieldCheck}   color="bg-blue-500" />
-          <StatCard label="በስራ ላይ"        value={stats.active}      icon={CheckCircle2}  color="bg-green-500" />
+          <StatCard label="በስራ ላይ"        value={stats.active}   icon={CheckCircle2}  color="bg-green-500" />
           <StatCard label="የሚያልቁ"         value={stats.expiring} icon={AlertTriangle} color="bg-yellow-500" />
           <StatCard label="አልቀው"         value={stats.expired}  icon={XCircle}       color="bg-red-500" />
         </div>
@@ -864,15 +867,22 @@ export default function WarrantyPage() {
             <label className="text-xs text-gray-500 mb-1 block">ፍለጋ</label>
             <div className="relative">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
                 placeholder="ኮድ፣ ምርት፣ ደንበኛ…"
-                className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand focus:outline-none" />
+                className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand focus:outline-none"
+              />
             </div>
           </div>
           <div>
             <label className="text-xs text-gray-500 mb-1 block">ሁኔታ</label>
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white focus:border-brand focus:outline-none">
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white focus:border-brand focus:outline-none"
+            >
               <option value="all">ሁሉም ሁኔታዎች</option>
               {Object.entries(WARRANTY_STATUS).map(([k, v]) => (
                 <option key={k} value={k}>{v.label}</option>
@@ -881,8 +891,11 @@ export default function WarrantyPage() {
           </div>
           <div>
             <label className="text-xs text-gray-500 mb-1 block">ቅርንጫፍ</label>
-            <select value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white focus:border-brand focus:outline-none">
+            <select
+              value={branchFilter}
+              onChange={(e) => setBranchFilter(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white focus:border-brand focus:outline-none"
+            >
               <option value="all">ሁሉም ቅርንጫፎች</option>
               {branches.map((b) => (
                 <option key={b._id} value={b._id}>{b.name}</option>
@@ -940,7 +953,7 @@ export default function WarrantyPage() {
                       {formatEthiopianDate(w._endDate)}
                     </td>
                     <td className="py-3 px-4 whitespace-nowrap font-medium text-gray-800">
-                      {w._daysLeft != null ? ${w._daysLeft} ቀን : '—'}
+                      {w._daysLeft != null ? `${w._daysLeft} ቀን` : '—'}
                     </td>
                     <td className="py-3 px-4 whitespace-nowrap">
                       <Badge color={w._statusColor}>{w._statusLabel}</Badge>
@@ -966,7 +979,7 @@ export default function WarrantyPage() {
       <Modal
         isOpen={Boolean(viewItem)}
         onClose={() => setViewItem(null)}
-        title={viewItem ? የዋስትና ዝርዝር —  : 'የዋስትና ዝርዝር'}
+        title={viewItem ? `የዋስትና ዝርዝር — ${viewItem._code}` : 'የዋስትና ዝርዝር'}
       >
         {viewItem && (
           <div className="space-y-3 text-sm">
@@ -1054,7 +1067,7 @@ function StatCard({ label, value, icon: Icon, color }) {
           <div className="text-xs text-gray-500">{label}</div>
           <div className="text-2xl font-bold text-gray-800 mt-1">{value}</div>
         </div>
-        <div className={w-10 h-10 rounded-lg  text-white flex items-center justify-center}>
+        <div className={`w-10 h-10 rounded-lg ${color || 'bg-brand'} text-white flex items-center justify-center`}>
           <Icon size={20} />
         </div>
       </div>

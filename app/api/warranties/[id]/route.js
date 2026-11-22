@@ -73,6 +73,8 @@ export async function DELETE(req, ctx) {
   try {
     const { error } = await requireRole(req, 'admin', 'owner', 'cashier');
     if (error) return error;
+    const authCheck = await requireRole(req, 'admin', 'owner', 'cashier');
+    console.log('[warranties DELETE] user:', authCheck?.user?._id, 'role:', JSON.stringify(authCheck?.user?.role));
 
     await connectDB();
 

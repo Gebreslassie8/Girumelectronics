@@ -1,4 +1,4 @@
-// app/api/warranties/[id]/route.js
+﻿// app/api/warranties/[id]/route.js
 import { NextResponse } from 'next/server';
 import mongoose from 'mongoose';
 import connectDB from '@/lib/db';
@@ -71,7 +71,7 @@ export async function PATCH(req, ctx) {
 // ============================================================
 export async function DELETE(req, ctx) {
   try {
-    const { error } = await requireRole(req, 'admin', 'owner');
+    const { error } = await requireRole(req, 'admin', 'owner', 'cashier');
     if (error) return error;
 
     await connectDB();

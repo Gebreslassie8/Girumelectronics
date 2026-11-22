@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/components/providers/AuthProvider';
 import {
   Plus, Search, Edit, Trash2, Eye, Users, DollarSign,
-  UserCheck, UserX, Phone, Mail, Building2, Shield, Briefcase,
+  UserCheck, UserX, Phone, Mail, Building2, Shield, Briefcase, EyeOff,
 } from 'lucide-react';
 import { formatETB } from '@/lib/utils';
 import {
@@ -393,10 +393,12 @@ function StatCard({ label, value, icon: Icon, color }) {
 }
 
 function EmployeeForm({ employee, branches, onSave, onCancel }) {
+  const [showPassword, setShowPassword] = useState(false);
   const [form, setForm] = useState({
     fullName: employee?.user?.fullName || employee?.fullName || '',
     phone: employee?.user?.phone || employee?.phone || '',
     email: employee?.user?.email || employee?.email || '',
+    password: '',
     position: employee?.position || 'ሻጭ',
     department: employee?.department || 'ሽያጭ',
     salary: employee?.salary || 0,
@@ -433,8 +435,18 @@ function EmployeeForm({ employee, branches, onSave, onCancel }) {
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    const userPayload = {
+      fullName: form.fullName,
+      phone: form.phone,
+      email: form.email,
+    };
+    if (form.password.trim()) {
+      userPayload.password = form.password;
+    }
+
     onSave({
-      user: { fullName: form.fullName, phone: form.phone, email: form.email },
+      user: userPayload,
+      ...(form.password.trim() ? { password: form.password } : {}),
       position: form.position,
       department: form.department,
       salary: form.salary,
@@ -462,10 +474,32 @@ function EmployeeForm({ employee, branches, onSave, onCancel }) {
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
             />
           </FormField>
-          <FormField label="ኢሜይል" full>
-            <input type="email" name="email" value={form.email} onChange={onChange}
+          <FormField label="ኢሜይል *">
+            <input type="email" name="email" value={form.email} onChange={onChange} required
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
             />
+          </FormField>
+          <FormField label={employee ? 'አዲስ ፓስወርድ (ካልተቀየረ ባዶ ይተዉ)' : 'ፓስወርድ *'}>
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                name="password"
+                value={form.password}
+                onChange={onChange}
+                required={!employee}
+                minLength={6}
+                placeholder={employee ? '••••••••' : 'ቢያንስ 6 ፊደላት/ቁጥሮች'}
+                className="w-full px-3 py-2 pr-9 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm text-gray-800 bg-white"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((s) => !s)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+              </button>
+            </div>
           </FormField>
         </div>
       </div>

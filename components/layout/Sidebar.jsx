@@ -14,9 +14,11 @@ import {
 // =====================================================================
 // MENU STRUCTURE
 // =====================================================================
+const ALL_ROLES = ['admin', 'seller', 'cashier', 'storekeeper', 'customer'];
+
 const MENU = [
   { href: '/dashboard', key: 'dashboard', fallback: 'ዳሽቦርድ', icon: LayoutDashboard,
-    roles: ['admin', 'seller', 'cashier', 'storekeeper', 'customer'] },
+    roles: ALL_ROLES },
   { href: '/dashboard/users', key: 'users', fallback: 'ተጠቃሚዎች', icon: Users, roles: ['admin'] },
   { href: '/dashboard/employees', key: 'employees', fallback: 'ሠራተኞች', icon: UserCog, roles: ['admin'] },
   { href: '/dashboard/inventory', key: 'warehouse', fallback: 'መጋዘን', icon: Warehouse,
@@ -29,7 +31,7 @@ const MENU = [
     roles: ['admin', 'seller', 'cashier', 'customer'] },
   { href: '/dashboard/branches', key: 'branches', fallback: 'ቅርንጫፎች', icon: Building2, roles: ['admin'] },
   { href: '/dashboard/warranty', key: 'warranty', fallback: 'ዋስትና', icon: ShieldCheck,
-    roles: ['admin', 'seller', 'cashier', 'storekeeper', 'customer'] },
+    roles: ALL_ROLES },
   {
     key: 'finance', fallback: 'ፋይናንስ', icon: Wallet, roles: ['admin', 'seller'],
     children: [
@@ -40,22 +42,30 @@ const MENU = [
   },
   {
     key: 'more', fallback: 'ሌላ', icon: Settings,
-    roles: ['admin', 'seller', 'cashier', 'storekeeper', 'customer'],
+    roles: ALL_ROLES,
     children: [
       { href: '/dashboard/notifications', key: 'notifications', fallback: 'ማሳወቂያዎች', icon: Bell,
-        roles: ['admin', 'seller', 'cashier', 'storekeeper', 'customer'] },
-      { href: '/dashboard/activity', key: 'activity', fallback: 'እንቅስቃሴ', icon: Activity, roles: ['admin'] },
-      { href: '/dashboard/settings', key: 'settings', fallback: 'ቅንብሮች', icon: Settings, roles: ['admin'] },
+        roles: ALL_ROLES },
+      { href: '/dashboard/activity', key: 'activity', fallback: 'እንቅስቃሴ', icon: Activity,
+        roles: ALL_ROLES },
+      { href: '/dashboard/settings', key: 'settings', fallback: 'ቅንብሮች', icon: Settings,
+        roles: ALL_ROLES },
     ],
   },
 ];
+
+function stripLocalePrefix(pathname = '') {
+  return pathname.replace(/^\/(am|en)(?=\/|$)/, '') || '/';
+}
 
 export default function Sidebar({ open = false, onClose = () => {} }) {
   const pathname = usePathname();
   const { user, token } = useAuth();
   const t = useTranslations('nav');
-  const role = user?.role || 'admin';
+  const role = user?.role || 'customer';
   const [unreadCount, setUnreadCount] = useState(0);
+
+  const normalizedPath = stripLocalePrefix(pathname);
 
   const loadUnreadCount = useCallback(async () => {
     try {
@@ -94,18 +104,27 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
   };
 
   const canSee = (item) => !item.roles || item.roles.includes(role);
-  const isActive = (href) => pathname === href || pathname.startsWith(href + '/');
+  const isActive = (href) => {
+    if (href === '/dashboard') {
+      return normalizedPath === '/dashboard';
+    }
+    return normalizedPath === href || normalizedPath.startsWith(href + '/');
+  };
   const parentIsActive = (item) => item.children?.some((c) => isActive(c.href)) || false;
 
   const renderNavIcon = (item, active) => {
     const IconComp = item.icon;
+    const iconClass = active
+      ? 'text-white'
+      : 'text-gray-500 group-hover:text-white transition-colors';
+
     if (item.key !== 'notifications') {
-      return <IconComp size={16} className={active ? '' : 'text-gray-500'} />;
+      return <IconComp size={16} className={iconClass} />;
     }
 
     return (
       <span className="relative inline-flex items-center justify-center shrink-0">
-        <IconComp size={16} className={active ? '' : 'text-gray-500'} />
+        <IconComp size={16} className={iconClass} />
         {unreadCount > 0 && (
           <span
             className={`absolute -top-1.5 -right-1.5 w-2 h-2 rounded-full ring-2 ${
@@ -116,6 +135,13 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
       </span>
     );
   };
+
+  const navLinkClasses = (active) =>
+    `group flex items-center justify-between gap-2 mx-2 px-3 py-2 rounded-lg text-sm transition-colors ${
+      active
+        ? 'bg-brand text-white shadow-sm'
+        : 'text-gray-700 hover:bg-green-600 hover:text-white'
+    }`;
 
   return (
     <>
@@ -136,16 +162,13 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
         <div className="px-4 h-16 border-b border-gray-100 flex items-center justify-between">
           <Link
             href="/dashboard"
-            className="font-bold text-lg text-brand rounded-md px-1 -mx-1
-              focus:outline-none focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-1"
+            className="font-bold text-lg text-brand rounded-md px-1 -mx-1"
           >
             {tr('brand', 'ግሩም ኤሌክትሮኒክስ')}
           </Link>
           <button
             onClick={onClose}
-            className="md:hidden p-1 rounded-md text-gray-600
-              focus:outline-none focus:bg-green-600 focus:text-white
-              focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-1"
+            className="md:hidden p-1 rounded-md text-gray-600 hover:bg-green-600 hover:text-white transition-colors"
             aria-label="close"
           >
             <X size={18} />
@@ -193,15 +216,7 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
                           <Link
                             href={c.href}
                             onClick={onClose}
-                            className={`flex items-center justify-between gap-2 mx-2 px-3 py-2 rounded-lg text-sm
-                              focus:outline-none
-                              focus:bg-green-600 focus:text-white
-                              focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-1
-                              ${
-                              active
-                                ? 'bg-brand text-white shadow-sm'
-                                : 'text-gray-700'
-                            }`}
+                            className={navLinkClasses(active)}
                           >
                             <span className="flex items-center gap-3 min-w-0">
                               {renderNavIcon(c, active)}
@@ -235,15 +250,7 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
                 key={item.key}
                 href={item.href}
                 onClick={onClose}
-                className={`flex items-center justify-between gap-2 mx-2 px-3 py-2 rounded-lg text-sm
-                  focus:outline-none
-                  focus:bg-green-600 focus:text-white
-                  focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-1
-                  ${
-                  active
-                    ? 'bg-brand text-white shadow-sm'
-                    : 'text-gray-700'
-                }`}
+                className={navLinkClasses(active)}
               >
                 <span className="flex items-center gap-3 min-w-0">
                   {renderNavIcon(item, active)}

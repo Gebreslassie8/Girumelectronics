@@ -30,15 +30,16 @@ export async function PATCH(req, { params }) {
     const employee = await Employee.findById(id);
     if (!employee) return NextResponse.json({ error: 'Employee not found' }, { status: 404 });
 
-    if (userPatch) {
-      const userUpdate = {};
-      if (userPatch.fullName) userUpdate.fullName = userPatch.fullName;
-      if (userPatch.phone) userUpdate.phone = userPatch.phone;
-      if (userPatch.email !== undefined) userUpdate.email = userPatch.email || undefined;
-      if (Object.keys(userUpdate).length > 0) {
-        await User.findByIdAndUpdate(employee.user, userUpdate, { runValidators: true });
-      }
-    }
+  if (userPatch) {
+  const userDoc = await User.findById(employee.user).select('+password');
+  if (userDoc) {
+    if (userPatch.fullName) userDoc.fullName = userPatch.fullName;
+    if (userPatch.phone) userDoc.phone = userPatch.phone;
+    if (userPatch.email !== undefined) userDoc.email = userPatch.email ? userPatch.email.trim().toLowerCase() : undefined;
+    if (userPatch.password) userDoc.password = userPatch.password;
+    await userDoc.save();
+  }
+}
 
     const empFields = ['position', 'department', 'salary', 'status', 'branch', 'emergencyContact', 'permissions'];
     for (const k of empFields) {

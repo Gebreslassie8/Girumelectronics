@@ -1,11 +1,39 @@
 import { NextResponse } from 'next/server';
+import mongoose from 'mongoose';
 import connectDB from '@/lib/db';
-import { Product } from '@/models';
-import { requireAuth, requireRole } from '@/lib/auth';
+import { Product, Employee } from '@/models';
+import { requireAuth } from '@/lib/auth';
+
+function isAdminUser(user) {
+  return ['admin', 'owner'].includes(user?.role);
+}
+
+async function getStaffContext(user) {
+  const emp = await Employee.findOne({ user: user._id || user.id })
+    .select('branch permissions')
+    .lean();
+
+  const branchId = (user?.branch?._id || user?.branch)
+    ? String(user.branch._id || user.branch)
+    : emp?.branch
+    ? String(emp.branch)
+    : null;
+
+  const perms = {
+    ...(emp?.permissions?.products || {}),
+    ...(user?.permissions?.products || {}),
+  };
+
+  return { branchId, perms };
+}
 
 export async function GET(req, { params }) {
   const { id } = await params;
-  const { error } = await requireAuth(req);
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return NextResponse.json({ error: 'Invalid product ID' }, { status: 400 });
+  }
+
+  const { user, error } = await requireAuth(req);
   if (error) return error;
 
   await connectDB();
@@ -13,15 +41,37 @@ export async function GET(req, { params }) {
     .populate('branch', 'name code')
     .populate('createdBy', 'fullName phone')
     .lean();
+
   if (!product) {
     return NextResponse.json({ error: 'Product not found' }, { status: 404 });
   }
+
+  if (!isAdminUser(user)) {
+    const { branchId, perms } = await getStaffContext(user);
+    const productBranchId = product.branch?._id
+      ? String(product.branch._id)
+      : product.branch
+      ? String(product.branch)
+      : null;
+
+    if (!perms.allBranches && (!branchId || productBranchId !== branchId)) {
+      return NextResponse.json(
+        { error: 'ይህንን ዕቃ ከተመደቡበት ቅርንጫፍ ውጭ ማየት አይችሉም' },
+        { status: 403 }
+      );
+    }
+  }
+
   return NextResponse.json(product);
 }
 
 export async function PATCH(req, { params }) {
   const { id } = await params;
-  const { error } = await requireRole(req, 'admin', 'owner', 'seller');
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return NextResponse.json({ error: 'Invalid product ID' }, { status: 400 });
+  }
+
+  const { user, error } = await requireAuth(req);
   if (error) return error;
 
   try {
@@ -33,10 +83,36 @@ export async function PATCH(req, { params }) {
       return NextResponse.json({ error: 'Product not found' }, { status: 404 });
     }
 
-    const allowed = [
-      'name', 'category', 'description', 'quantity', 'unit',
-      'unitPrice', 'sellingPrice', 'status', 'branch', 'image',
-    ];
+    const admin = isAdminUser(user);
+
+    if (!admin) {
+      const { branchId, perms } = await getStaffContext(user);
+      const canEdit =
+        ['seller', 'storekeeper'].includes(user.role) || Boolean(perms.update || perms.edit);
+
+      if (!canEdit) {
+        return NextResponse.json({ error: 'ዕቃ ለማስተካከል ፈቃድ የለዎትም' }, { status: 403 });
+      }
+
+      const productBranchId = product.branch ? String(product.branch) : null;
+      if (!perms.allBranches && (!branchId || productBranchId !== branchId)) {
+        return NextResponse.json(
+          { error: 'ከተመደቡበት ቅርንጫፍ ውጭ ያለ ዕቃ ማስተካከል አይችሉም' },
+          { status: 403 }
+        );
+      }
+    }
+
+    // Only admin/owner can reassign a product to a different branch
+    const allowed = admin
+      ? [
+          'name', 'category', 'description', 'quantity', 'unit',
+          'unitPrice', 'sellingPrice', 'status', 'branch', 'image',
+        ]
+      : [
+          'name', 'category', 'description', 'quantity', 'unit',
+          'unitPrice', 'sellingPrice', 'status', 'image',
+        ];
 
     for (const k of allowed) {
       if (body[k] !== undefined) {
@@ -50,7 +126,6 @@ export async function PATCH(req, { params }) {
       }
     }
 
-    // Validate selling >= unit price
     if (product.sellingPrice < product.unitPrice) {
       return NextResponse.json(
         { error: 'የመሸጫ ዋጋ ከመግዣ ዋጋ መቀነስ አይችልም' },
@@ -80,13 +155,34 @@ export async function PATCH(req, { params }) {
 
 export async function DELETE(req, { params }) {
   const { id } = await params;
-  const { error } = await requireRole(req, 'admin', 'owner');
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return NextResponse.json({ error: 'Invalid product ID' }, { status: 400 });
+  }
+
+  const { user, error } = await requireAuth(req);
   if (error) return error;
 
   await connectDB();
-  const product = await Product.findByIdAndDelete(id);
+  const product = await Product.findById(id);
   if (!product) {
     return NextResponse.json({ error: 'Product not found' }, { status: 404 });
   }
+
+  const admin = isAdminUser(user);
+  if (!admin) {
+    const { branchId, perms } = await getStaffContext(user);
+    const productBranchId = product.branch ? String(product.branch) : null;
+    const canDeleteOwnBranch =
+      Boolean(perms.delete) && branchId && productBranchId === branchId;
+
+    if (!canDeleteOwnBranch) {
+      return NextResponse.json(
+        { error: 'ይህንን ዕቃ ለመሰረዝ ፈቃድ የለዎትም' },
+        { status: 403 }
+      );
+    }
+  }
+
+  await product.deleteOne();
   return NextResponse.json({ ok: true });
 }

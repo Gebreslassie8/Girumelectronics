@@ -23,28 +23,59 @@ export async function POST(req) {
   try {
     await connectDB();
     const body = await req.json();
-    const { user, position, department, salary, status, branch, emergencyContact, permissions } = body;
+    const {
+      user,
+      password: topPassword,
+      position,
+      department,
+      salary,
+      status,
+      branch,
+      emergencyContact,
+      permissions,
+    } = body;
 
-    if (!user?.fullName || !user?.phone || !position || salary == null) {
+    const rawPassword =
+      typeof user?.password === 'string' && user.password.trim()
+        ? user.password.trim()
+        : typeof topPassword === 'string' && topPassword.trim()
+        ? topPassword.trim()
+        : '';
+
+    if (!user?.fullName || !user?.phone || !rawPassword || !position || salary == null) {
       return NextResponse.json(
-        { error: 'Missing required fields' },
+        { error: 'Missing required fields (including password)' },
         { status: 400 }
       );
     }
 
-    const phoneExists = await User.findOne({ phone: user.phone }).lean();
-    if (phoneExists) {
+    const cleanPhone = user.phone.trim();
+    const cleanEmail = user.email ? user.email.trim().toLowerCase() : undefined;
+
+    const existingUser = await User.findOne({
+      $or: [
+        { phone: cleanPhone },
+        ...(cleanEmail ? [{ email: cleanEmail }] : []),
+      ],
+    }).lean();
+
+    if (existingUser) {
+      const isEmailMatch = cleanEmail && existingUser.email === cleanEmail;
       return NextResponse.json(
-        { error: 'Phone number already registered' },
+        {
+          error: isEmailMatch
+            ? 'Email already registered'
+            : 'Phone number already registered',
+        },
         { status: 409 }
       );
     }
 
     const newUser = await User.create({
       fullName: user.fullName.trim(),
-      phone: user.phone.trim(),
-      email: user.email?.toLowerCase() || undefined,
-      password: 'welcome123',
+      phone: cleanPhone,
+      email: cleanEmail,
+      password: rawPassword,
       role: 'seller',
       branch: branch || null,
       isActive: true,
@@ -67,7 +98,11 @@ export async function POST(req) {
     return NextResponse.json(employee, { status: 201 });
   } catch (err) {
     if (err.code === 11000) {
-      return NextResponse.json({ error: 'Already registered' }, { status: 409 });
+      const dupField = Object.keys(err.keyPattern || {})[0];
+      return NextResponse.json(
+        { error: dupField ? `${dupField} already registered` : 'Already registered' },
+        { status: 409 }
+      );
     }
     if (err.name === 'ValidationError') {
       const errs = {};

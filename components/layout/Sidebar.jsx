@@ -62,7 +62,7 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
   const pathname = usePathname();
   const router = useRouter();
   const auth = useAuth();
-  const { user, token } = auth || {};
+  const { user, token, loading: authLoading } = auth || {};
   const t = useTranslations('nav');
   const role = user?.role || 'customer';
   const [unreadCount, setUnreadCount] = useState(0);
@@ -71,6 +71,7 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
   const normalizedPath = stripLocalePrefix(pathname);
 
   const loadUnreadCount = useCallback(async () => {
+    if (!user) return;
     try {
       const headers = {};
       if (token) headers.Authorization = `Bearer ${token}`;
@@ -85,17 +86,18 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
       const data = await res.json();
       const list = Array.isArray(data) ? data : data.notifications || [];
       const count = list.filter((item) => !(item.read ?? item.isRead)).length;
-      setUnreadCount(count);
+      setUnreadCount((prev) => (prev === count ? prev : count));
     } catch {
       // keep existing count on transient network error
     }
-  }, [token]);
+  }, [user, token]);
 
   useEffect(() => {
+    if (authLoading || !user) return;
     loadUnreadCount();
     const interval = setInterval(loadUnreadCount, 30000);
     return () => clearInterval(interval);
-  }, [loadUnreadCount, pathname]);
+  }, [authLoading, user, loadUnreadCount, pathname]);
 
   const tr = (key, fallback) => {
     try {
@@ -118,15 +120,18 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
           credentials: 'include',
         }).catch(() => {});
       }
-    } finally {
       onClose();
-      router.push('/login');
-      router.refresh();
+      router.replace('/login');
+    } finally {
       setLoggingOut(false);
     }
   };
 
-  const canSee = (item) => !item.roles || item.roles.includes(role);
+  const canSee = (item) => {
+    if (authLoading && !user) return false;
+    return !item.roles || item.roles.includes(role);
+  };
+
   const isActive = (href) => {
     if (href === '/dashboard') {
       return normalizedPath === '/dashboard';
@@ -177,7 +182,7 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
       />
 
       <aside
-        className={`fixed md:sticky top-0 z-50 md:z-0 h-screen w-64 flex-shrink-0 bg-white border-r border-gray-200 flex flex-col transition-transform md:translate-x-0 ${
+        className={`fixed md:sticky top-0 z-50 md:z-0 h-screen w-64 flex-shrink-0 bg-white border-r border-gray-200 flex flex-col md:translate-x-0 ${
           open ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -200,99 +205,107 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
 
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto py-3">
-          {MENU.filter(canSee).map((item) => {
-            const label = tr(item.key, item.fallback);
+          {authLoading && !user ? (
+            <div className="space-y-2 px-4 py-2">
+              <div className="h-8 rounded-lg bg-gray-100" />
+              <div className="h-8 rounded-lg bg-gray-100" />
+              <div className="h-8 rounded-lg bg-gray-100" />
+            </div>
+          ) : (
+            MENU.filter(canSee).map((item) => {
+              const label = tr(item.key, item.fallback);
 
-            if (item.children) {
-              const childVisible = item.children.filter(canSee);
-              if (childVisible.length === 0) return null;
-              const groupActive = parentIsActive(item);
-              const groupHasUnread =
-                item.key === 'more' &&
-                childVisible.some((c) => c.key === 'notifications') &&
-                unreadCount > 0;
+              if (item.children) {
+                const childVisible = item.children.filter(canSee);
+                if (childVisible.length === 0) return null;
+                const groupActive = parentIsActive(item);
+                const groupHasUnread =
+                  item.key === 'more' &&
+                  childVisible.some((c) => c.key === 'notifications') &&
+                  unreadCount > 0;
+
+                return (
+                  <div key={item.key} className="mb-1">
+                    <div
+                      className={`px-4 py-2 text-[11px] font-semibold uppercase tracking-wide flex items-center justify-between ${
+                        groupActive ? 'text-green-700' : 'text-gray-500'
+                      }`}
+                    >
+                      <span className="flex items-center gap-2">
+                        <item.icon size={14} />
+                        {label}
+                      </span>
+                      {groupHasUnread && (
+                        <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-amber-100 text-amber-800">
+                          {unreadCount > 99 ? '99+' : unreadCount}
+                        </span>
+                      )}
+                    </div>
+                    <ul>
+                      {childVisible.map((c) => {
+                        const active = isActive(c.href);
+                        const showBadge = c.key === 'notifications' && unreadCount > 0;
+
+                        return (
+                          <li key={c.key}>
+                            <Link
+                              href={c.href}
+                              onClick={onClose}
+                              className={navLinkClasses(active)}
+                            >
+                              <span className="flex items-center gap-3 min-w-0">
+                                {renderNavIcon(c, active)}
+                                <span className="truncate">{tr(c.key, c.fallback)}</span>
+                              </span>
+                              {showBadge && (
+                                <span
+                                  className={`px-1.5 py-0.5 text-[11px] font-bold rounded-full shrink-0 ${
+                                    active
+                                      ? 'bg-white text-brand'
+                                      : 'bg-amber-700 text-white'
+                                  }`}
+                                >
+                                  {unreadCount > 99 ? '99+' : unreadCount}
+                                </span>
+                              )}
+                            </Link>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                );
+              }
+
+              const active = isActive(item.href);
+              const showBadge = item.key === 'notifications' && unreadCount > 0;
 
               return (
-                <div key={item.key} className="mb-1">
-                  <div
-                    className={`px-4 py-2 text-[11px] font-semibold uppercase tracking-wide flex items-center justify-between ${
-                      groupActive ? 'text-green-700' : 'text-gray-500'
-                    }`}
-                  >
-                    <span className="flex items-center gap-2">
-                      <item.icon size={14} />
-                      {label}
-                    </span>
-                    {groupHasUnread && (
-                      <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-amber-100 text-amber-800">
-                        {unreadCount > 99 ? '99+' : unreadCount}
-                      </span>
-                    )}
-                  </div>
-                  <ul>
-                    {childVisible.map((c) => {
-                      const active = isActive(c.href);
-                      const showBadge = c.key === 'notifications' && unreadCount > 0;
-
-                      return (
-                        <li key={c.key}>
-                          <Link
-                            href={c.href}
-                            onClick={onClose}
-                            className={navLinkClasses(active)}
-                          >
-                            <span className="flex items-center gap-3 min-w-0">
-                              {renderNavIcon(c, active)}
-                              <span className="truncate">{tr(c.key, c.fallback)}</span>
-                            </span>
-                            {showBadge && (
-                              <span
-                                className={`px-1.5 py-0.5 text-[11px] font-bold rounded-full shrink-0 ${
-                                  active
-                                    ? 'bg-white text-brand'
-                                    : 'bg-amber-700 text-white'
-                                }`}
-                              >
-                                {unreadCount > 99 ? '99+' : unreadCount}
-                              </span>
-                            )}
-                          </Link>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              );
-            }
-
-            const active = isActive(item.href);
-            const showBadge = item.key === 'notifications' && unreadCount > 0;
-
-            return (
-              <Link
-                key={item.key}
-                href={item.href}
-                onClick={onClose}
-                className={navLinkClasses(active)}
-              >
-                <span className="flex items-center gap-3 min-w-0">
-                  {renderNavIcon(item, active)}
-                  <span className="truncate">{label}</span>
-                </span>
-                {showBadge && (
-                  <span
-                    className={`px-1.5 py-0.5 text-[11px] font-bold rounded-full shrink-0 ${
-                      active
-                        ? 'bg-white text-brand'
-                        : 'bg-amber-700 text-white'
-                    }`}
-                  >
-                    {unreadCount > 99 ? '99+' : unreadCount}
+                <Link
+                  key={item.key}
+                  href={item.href}
+                  onClick={onClose}
+                  className={navLinkClasses(active)}
+                >
+                  <span className="flex items-center gap-3 min-w-0">
+                    {renderNavIcon(item, active)}
+                    <span className="truncate">{label}</span>
                   </span>
-                )}
-              </Link>
-            );
-          })}
+                  {showBadge && (
+                    <span
+                      className={`px-1.5 py-0.5 text-[11px] font-bold rounded-full shrink-0 ${
+                        active
+                          ? 'bg-white text-brand'
+                          : 'bg-amber-700 text-white'
+                      }`}
+                    >
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
+                  )}
+                </Link>
+              );
+            })
+          )}
         </nav>
 
         {/* Footer + Logout */}

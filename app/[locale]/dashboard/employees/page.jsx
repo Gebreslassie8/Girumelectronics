@@ -45,6 +45,12 @@ function formatEthiopianDate(input, options = {}) {
   }
 }
 
+function normalizeKey(str = '') {
+  return String(str)
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
 function normalizePermissionsObject(raw) {
   if (!raw) return {};
   if (raw instanceof Map) {
@@ -58,7 +64,15 @@ function normalizePermissionsObject(raw) {
 
 function getPermissionValue(permissions, key) {
   const obj = normalizePermissionsObject(permissions);
-  return Boolean(obj[key]);
+  if (obj[key] !== undefined) return Boolean(obj[key]);
+
+  const targetNorm = normalizeKey(key);
+  for (const [k, v] of Object.entries(obj)) {
+    if (normalizeKey(k) === targetNorm) {
+      return Boolean(v);
+    }
+  }
+  return false;
 }
 
 function isStorekeeperPosition(position = '') {
@@ -81,7 +95,10 @@ function buildInitialPermissions(employeePermissions, position = '') {
 
   for (const perm of PERMISSIONS_LIST) {
     if (perm?.key && base[perm.key] === undefined) {
-      if (storekeeperDefault && perm.key.toLowerCase().includes('inventory')) {
+      const existingVal = getPermissionValue(existing, perm.key);
+      if (existingVal) {
+        base[perm.key] = true;
+      } else if (storekeeperDefault && perm.key.toLowerCase().includes('inventory')) {
         base[perm.key] = true;
       } else {
         base[perm.key] = false;
@@ -178,6 +195,8 @@ export default function EmployeesPage() {
 
   const handleSave = async (data) => {
     try {
+      const sentPerms = normalizePermissionsObject(data.permissions);
+
       if (editingEmployee) {
         const res = await apiFetch('/employees/' + editingEmployee._id, {
           method: 'PATCH',
@@ -190,7 +209,7 @@ export default function EmployeesPage() {
           permissions: {
             ...normalizePermissionsObject(editingEmployee.permissions),
             ...normalizePermissionsObject(serverEmp.permissions),
-            ...normalizePermissionsObject(data.permissions),
+            ...sentPerms,
           },
         };
         setEmployees((prev) => prev.map((e) => (e._id === editingEmployee._id ? merged : e)));
@@ -207,8 +226,8 @@ export default function EmployeesPage() {
         const created = {
           ...createdEmp,
           permissions: {
-            ...normalizePermissionsObject(data.permissions),
             ...normalizePermissionsObject(createdEmp.permissions),
+            ...sentPerms,
           },
         };
         setEmployees((prev) => [created, ...prev]);
@@ -481,10 +500,16 @@ function EmployeeForm({ employee, branches, onSave, onCancel }) {
   };
 
   const togglePermission = (key) => {
-    setForm((prev) => ({
-      ...prev,
-      permissions: { ...(prev.permissions || {}), [key]: !prev.permissions?.[key] },
-    }));
+    setForm((prev) => {
+      const current = getPermissionValue(prev.permissions, key);
+      return {
+        ...prev,
+        permissions: {
+          ...normalizePermissionsObject(prev.permissions),
+          [key]: !current,
+        },
+      };
+    });
   };
 
   const handleSubmit = (e) => {
@@ -617,7 +642,7 @@ function EmployeeForm({ employee, branches, onSave, onCancel }) {
             <label key={perm.key} className="flex items-center gap-2 cursor-pointer text-sm">
               <input
                 type="checkbox"
-                checked={Boolean(form.permissions?.[perm.key])}
+                checked={getPermissionValue(form.permissions, perm.key)}
                 onChange={() => togglePermission(perm.key)}
                 className="w-4 h-4 rounded border-gray-300 text-brand focus:ring-brand"
               />

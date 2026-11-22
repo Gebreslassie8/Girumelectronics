@@ -3,26 +3,9 @@ import mongoose from 'mongoose';
 import connectDB from '@/lib/db';
 import { Receipt } from '@/models';
 import { requireAuth } from '@/lib/auth';
-import { buildOwnershipFilter, canPerformAction, isAdmin } from '@/lib/permissions';
+import { isAdmin, resolveUserBranchId, canPerformBranchCrud } from '@/lib/permissions';
 
-// GET /api/receipts
-export async function GET(req) {
-  const { user, error } = await requireAuth(req);
-  if (error) return error;
-
-  await connectDB();
-  const ownershipFilter = buildOwnershipFilter(user, 'receipts');
-  const receipts = await Receipt.find(ownershipFilter)
-    .populate('customer', 'fullName phone email')
-    .populate('branch', 'name code')
-    .sort({ createdAt: -1 })
-    .lean();
-
-  return NextResponse.json(receipts);
-}
-
-// GET /api/receipts/[id]
-export async function GET_BY_ID(req, { params }) {
+export async function GET(req, { params }) {
   const { id } = await params;
   if (!mongoose.Types.ObjectId.isValid(id)) {
     return NextResponse.json({ error: 'Invalid receipt ID' }, { status: 400 });
@@ -38,17 +21,20 @@ export async function GET_BY_ID(req, { params }) {
     .lean();
 
   if (!receipt) {
-    return NextResponse.json({ error: 'Receipt not found' }, { status: 404 });
+    return NextResponse.json({ error: 'ደረሰኝ አልተገኘም' }, { status: 404 });
   }
 
-  if (!canPerformAction(user, 'receipts', 'read', receipt)) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const userBranchId = await resolveUserBranchId(user);
+  if (!canPerformBranchCrud(user, userBranchId, 'read', receipt)) {
+    return NextResponse.json(
+      { error: 'ይህንን ደረሰኝ ከተመደቡበት ቅርንጫፍ ውጭ ማየት አይችሉም' },
+      { status: 403 }
+    );
   }
 
   return NextResponse.json(receipt);
 }
 
-// PATCH /api/receipts/[id]
 export async function PATCH(req, { params }) {
   const { id } = await params;
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -61,11 +47,15 @@ export async function PATCH(req, { params }) {
   await connectDB();
   const receipt = await Receipt.findById(id);
   if (!receipt) {
-    return NextResponse.json({ error: 'Receipt not found' }, { status: 404 });
+    return NextResponse.json({ error: 'ደረሰኝ አልተገኘም' }, { status: 404 });
   }
 
-  if (!canPerformAction(user, 'receipts', 'update', receipt)) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const userBranchId = await resolveUserBranchId(user);
+  if (!canPerformBranchCrud(user, userBranchId, 'update', receipt)) {
+    return NextResponse.json(
+      { error: 'ይህንን ደረሰኝ ለማስተካከል ፈቃድ የለዎትም' },
+      { status: 403 }
+    );
   }
 
   const body = await req.json().catch(() => null);
@@ -74,8 +64,8 @@ export async function PATCH(req, { params }) {
   }
 
   const allowedFields = isAdmin(user)
-    ? ['status', 'paidAmount', 'balance', 'notes', 'paymentMethod', 'branch']
-    : ['status', 'paidAmount', 'notes', 'paymentMethod'];
+    ? ['status', 'paidAmount', 'advanceAmount', 'remainingAmount', 'balance', 'notes', 'paymentMethod', 'branch', 'items']
+    : ['status', 'paidAmount', 'advanceAmount', 'remainingAmount', 'balance', 'notes', 'paymentMethod', 'items'];
 
   for (const field of allowedFields) {
     if (body[field] !== undefined) {
@@ -84,10 +74,12 @@ export async function PATCH(req, { params }) {
   }
 
   await receipt.save();
+  await receipt.populate('customer', 'fullName phone email');
+  await receipt.populate('branch', 'name code');
+
   return NextResponse.json(receipt);
 }
 
-// DELETE /api/receipts/[id]
 export async function DELETE(req, { params }) {
   const { id } = await params;
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -100,11 +92,15 @@ export async function DELETE(req, { params }) {
   await connectDB();
   const receipt = await Receipt.findById(id);
   if (!receipt) {
-    return NextResponse.json({ error: 'Receipt not found' }, { status: 404 });
+    return NextResponse.json({ error: 'ደረሰኝ አልተገኘም' }, { status: 404 });
   }
 
-  if (!canPerformAction(user, 'receipts', 'delete', receipt)) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const userBranchId = await resolveUserBranchId(user);
+  if (!canPerformBranchCrud(user, userBranchId, 'delete', receipt)) {
+    return NextResponse.json(
+      { error: 'ይህንን ደረሰኝ ከተመደቡበት ቅርንጫፍ ውጭ መሰረዝ አይችሉም' },
+      { status: 403 }
+    );
   }
 
   await receipt.deleteOne();

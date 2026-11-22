@@ -3,16 +3,58 @@ import connectDB from '@/lib/db';
 import { Employee, User } from '@/models';
 import { requireAuth, requireRole } from '@/lib/auth';
 
+const ALLOWED_STAFF_ROLES = ['admin', 'owner', 'seller', 'cashier', 'storekeeper'];
+
+const POSITION_TO_ROLE = {
+  'አስተዳዳሪ': 'admin',
+  Admin: 'admin',
+  'ባለቤት': 'owner',
+  Owner: 'owner',
+  'ሻጭ': 'seller',
+  Seller: 'seller',
+  'ገንዘብ ተቀባይ': 'cashier',
+  Cashier: 'cashier',
+  'መጋዘን ኃላፊ': 'storekeeper',
+  'የመጋዘን ሰራተኛ': 'storekeeper',
+  Storekeeper: 'storekeeper',
+  'Store Keeper': 'storekeeper',
+};
+
+function resolveRoleFromInput(userRole, topRole, position) {
+  if (userRole && ALLOWED_STAFF_ROLES.includes(userRole)) return userRole;
+  if (topRole && ALLOWED_STAFF_ROLES.includes(topRole)) return topRole;
+  if (position) {
+    const trimmed = String(position).trim();
+    if (POSITION_TO_ROLE[trimmed]) return POSITION_TO_ROLE[trimmed];
+    if (trimmed.includes('መጋዘን') || trimmed.toLowerCase().includes('store')) {
+      return 'storekeeper';
+    }
+    if (trimmed.includes('ገንዘብ') || trimmed.toLowerCase().includes('cashier')) {
+      return 'cashier';
+    }
+  }
+  return 'seller';
+}
+
+function isAdminUser(user) {
+  return ['admin', 'owner'].includes(user?.role);
+}
+
 export async function GET(req) {
-  const { error } = await requireAuth(req);
+  const { user, error } = await requireAuth(req);
   if (error) return error;
 
   await connectDB();
-  const employees = await Employee.find({})
-    .populate('user', 'fullName phone email role')
+
+  // Admins/owners see all employees; non-admins see only their own record
+  const filter = isAdminUser(user) ? {} : { user: user._id || user.id };
+
+  const employees = await Employee.find(filter)
+    .populate('user', 'fullName phone email role branch isActive')
     .populate('branch', 'name code')
     .sort({ createdAt: -1 })
     .lean();
+
   return NextResponse.json(employees);
 }
 
@@ -26,6 +68,7 @@ export async function POST(req) {
     const {
       user,
       password: topPassword,
+      role: topRole,
       position,
       department,
       salary,
@@ -51,6 +94,8 @@ export async function POST(req) {
 
     const cleanPhone = user.phone.trim();
     const cleanEmail = user.email ? user.email.trim().toLowerCase() : undefined;
+    const cleanBranch = branch && branch !== '' ? branch : null;
+    const assignedRole = resolveRoleFromInput(user?.role, topRole, position);
 
     const existingUser = await User.findOne({
       $or: [
@@ -76,9 +121,9 @@ export async function POST(req) {
       phone: cleanPhone,
       email: cleanEmail,
       password: rawPassword,
-      role: 'seller',
-      branch: branch || null,
-      isActive: true,
+      role: assignedRole,
+      branch: cleanBranch,
+      isActive: (status || 'active') === 'active',
     });
 
     const employee = await Employee.create({
@@ -87,12 +132,12 @@ export async function POST(req) {
       department,
       salary,
       status: status || 'active',
-      branch: branch || null,
+      branch: cleanBranch,
       emergencyContact,
-      permissions,
+      permissions: permissions || {},
     });
 
-    await employee.populate('user', 'fullName phone email role');
+    await employee.populate('user', 'fullName phone email role branch isActive');
     await employee.populate('branch', 'name code');
 
     return NextResponse.json(employee, { status: 201 });

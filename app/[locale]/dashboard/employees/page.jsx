@@ -45,10 +45,54 @@ function formatEthiopianDate(input, options = {}) {
   }
 }
 
+function normalizePermissionsObject(raw) {
+  if (!raw) return {};
+  if (raw instanceof Map) {
+    return Object.fromEntries(raw.entries());
+  }
+  if (typeof raw === 'object') {
+    return { ...raw };
+  }
+  return {};
+}
+
 function getPermissionValue(permissions, key) {
-  if (!permissions) return false;
-  if (permissions instanceof Map) return Boolean(permissions.get(key));
-  return Boolean(permissions[key]);
+  const obj = normalizePermissionsObject(permissions);
+  return Boolean(obj[key]);
+}
+
+function isStorekeeperPosition(position = '') {
+  const val = String(position).trim().toLowerCase();
+  return val.includes('መጋዘን') || val.includes('store');
+}
+
+function buildInitialPermissions(employeePermissions, position = '') {
+  const existing = normalizePermissionsObject(employeePermissions);
+  const storekeeperDefault = isStorekeeperPosition(position);
+
+  const base = {
+    canSell: !storekeeperDefault,
+    canManageInventory: storekeeperDefault,
+    canManageOrders: !storekeeperDefault,
+    canIssueReceipts: !storekeeperDefault,
+    canViewAnalytics: false,
+    canManageEmployees: false,
+  };
+
+  for (const perm of PERMISSIONS_LIST) {
+    if (perm?.key && base[perm.key] === undefined) {
+      if (storekeeperDefault && perm.key.toLowerCase().includes('inventory')) {
+        base[perm.key] = true;
+      } else {
+        base[perm.key] = false;
+      }
+    }
+  }
+
+  return {
+    ...base,
+    ...existing,
+  };
 }
 
 export default function EmployeesPage() {
@@ -144,9 +188,9 @@ export default function EmployeesPage() {
           ...editingEmployee,
           ...serverEmp,
           permissions: {
-            ...(editingEmployee.permissions || {}),
-            ...(serverEmp.permissions || {}),
-            ...(data.permissions || {}),
+            ...normalizePermissionsObject(editingEmployee.permissions),
+            ...normalizePermissionsObject(serverEmp.permissions),
+            ...normalizePermissionsObject(data.permissions),
           },
         };
         setEmployees((prev) => prev.map((e) => (e._id === editingEmployee._id ? merged : e)));
@@ -163,8 +207,8 @@ export default function EmployeesPage() {
         const created = {
           ...createdEmp,
           permissions: {
-            ...(data.permissions || {}),
-            ...(createdEmp.permissions || {}),
+            ...normalizePermissionsObject(data.permissions),
+            ...normalizePermissionsObject(createdEmp.permissions),
           },
         };
         setEmployees((prev) => [created, ...prev]);
@@ -394,36 +438,46 @@ function StatCard({ label, value, icon: Icon, color }) {
 
 function EmployeeForm({ employee, branches, onSave, onCancel }) {
   const [showPassword, setShowPassword] = useState(false);
+  const initialPosition = employee?.position || 'ሻጭ';
   const [form, setForm] = useState({
     fullName: employee?.user?.fullName || employee?.fullName || '',
     phone: employee?.user?.phone || employee?.phone || '',
     email: employee?.user?.email || employee?.email || '',
     password: '',
-    position: employee?.position || 'ሻጭ',
+    position: initialPosition,
     department: employee?.department || 'ሽያጭ',
     salary: employee?.salary || 0,
     status: employee?.status || 'active',
     branch: employee?.branch?._id || '',
     emergencyName: employee?.emergencyContact?.name || '',
     emergencyPhone: employee?.emergencyContact?.phone || '',
-    permissions: {
-      canSell: true,
-      canManageInventory: false,
-      canManageOrders: true,
-      canIssueReceipts: true,
-      canViewAnalytics: false,
-      canManageEmployees: false,
-      ...(employee?.permissions && typeof employee.permissions === 'object'
-        ? (employee.permissions instanceof Map
-            ? Object.fromEntries(employee.permissions)
-            : employee.permissions)
-        : {}),
-    },
+    permissions: buildInitialPermissions(employee?.permissions, initialPosition),
   });
 
   const onChange = (e) => {
     const { name, value } = e.target;
-    setForm({ ...form, [name]: name === 'salary' ? Number(value) : value });
+    setForm((prev) => {
+      const next = {
+        ...prev,
+        [name]: name === 'salary' ? Number(value) : value,
+      };
+
+      if (name === 'position' && isStorekeeperPosition(value)) {
+        const invKeys = {};
+        for (const p of PERMISSIONS_LIST) {
+          if (p?.key && p.key.toLowerCase().includes('inventory')) {
+            invKeys[p.key] = true;
+          }
+        }
+        next.permissions = {
+          ...prev.permissions,
+          canManageInventory: true,
+          ...invKeys,
+        };
+      }
+
+      return next;
+    });
   };
 
   const togglePermission = (key) => {

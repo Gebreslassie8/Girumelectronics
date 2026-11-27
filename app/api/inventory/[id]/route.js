@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import { Inventory } from '@/models';
 import { requireAuth, requireRole } from '@/lib/auth';
-
 export async function GET(req, { params }) {
   const { id } = await params;
   const { error } = await requireAuth(req);
